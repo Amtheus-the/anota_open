@@ -3,7 +3,8 @@ import 'dotenv/config'
 const env = process.env
 
 export const config = {
-  port: Number(env.PORT ?? 3001),
+  // a Hostinger entrega a porta em PORT e, segundo a documentação dela, o padrão esperado é 3000; localmente o .env define 3001
+  port: Number(env.PORT ?? 3000),
   frontendUrl: env.FRONTEND_URL ?? 'http://localhost:5173',
   isProd: env.NODE_ENV === 'production',
   db: {
