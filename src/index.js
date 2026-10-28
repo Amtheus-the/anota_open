@@ -28,7 +28,7 @@ app.disable('x-powered-by')
 // (não depende de NODE_ENV: se o painel da hospedagem esquecer a variável, o limite continua certo; TRUST_PROXY=0 desliga)
 app.set('trust proxy', Number(process.env.TRUST_PROXY ?? 1))
 app.use(helmet())
-app.use(cors({ origin: config.frontendUrl }))
+app.use(cors({ origin: config.frontendOrigins }))
 app.use(express.json({ limit: '100kb' }))
 
 app.get('/api/health', async (_req, res) => {

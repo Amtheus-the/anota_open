@@ -5,7 +5,9 @@ const env = process.env
 export const config = {
   // a Hostinger entrega a porta em PORT e, segundo a documentação dela, o padrão esperado é 3000; localmente o .env define 3001
   port: Number(env.PORT ?? 3000),
-  frontendUrl: env.FRONTEND_URL ?? 'http://localhost:5173',
+  // FRONTEND_URL aceita vários endereços separados por vírgula (ex.: o site e http://localhost:5173 para testes); o primeiro é o principal
+  frontendOrigins: (env.FRONTEND_URL ?? 'http://localhost:5173').split(',').map((url) => url.trim().replace(/\/+$/, '')).filter(Boolean),
+  get frontendUrl() { return this.frontendOrigins[0] },
   isProd: env.NODE_ENV === 'production',
   // CPFs (só dígitos, separados por vírgula) que acessam o painel /admin; sem isso ninguém é admin
   adminCpfs: (env.ADMIN_CPFS ?? '').split(',').map((cpf) => cpf.replace(/\D/g, '')).filter(Boolean),
