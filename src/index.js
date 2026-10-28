@@ -75,7 +75,8 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'Erro interno' })
 })
 
-app.listen(config.port, (err) => {
+// 0.0.0.0 de propósito: a Hostinger alerta que um endereço só local (127.0.0.1) não é alcançável de fora do contêiner
+app.listen(config.port, '0.0.0.0', (err) => {
   if (err) {
     console.error('[servidor] não consegui abrir a porta', config.port, err.code ?? '', err.message)
     process.exit(1)
