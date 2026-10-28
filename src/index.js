@@ -10,6 +10,7 @@ import openFinanceRoutes from './routes/openFinance.js'
 import visionRoutes from './routes/vision.js'
 import logoRoutes from './routes/logo.js'
 import agentsRoutes from './routes/agents.js'
+import statusPage from './routes/status.js'
 import { startAgentRunner } from './services/agentRunner.js'
 
 assertConfig()
@@ -36,6 +37,10 @@ app.get('/api/health', async (_req, res) => {
     openFinance: Boolean(config.openFinance.clientId && config.openFinance.clientSecret),
   })
 })
+
+// Página de status (servidor, banco e variáveis): útil para achar erro de deploy. Só mostra sim/não e o código do erro.
+const statusLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false })
+app.get(['/', '/status'], statusLimiter, statusPage)
 
 // Limite de tentativas nas rotas de login/cadastro (força bruta e abuso de envio de código)
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false })
