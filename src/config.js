@@ -9,6 +9,8 @@ export const config = {
   frontendOrigins: (env.FRONTEND_URL ?? 'http://localhost:5173').split(',').map((url) => url.trim().replace(/\/+$/, '')).filter(Boolean),
   get frontendUrl() { return this.frontendOrigins[0] },
   isProd: env.NODE_ENV === 'production',
+  // dias de teste grátis para quem cria a conta (não existe plano gratuito)
+  trialDays: Number(env.TRIAL_DAYS ?? 30),
   // CPFs (só dígitos, separados por vírgula) que acessam o painel /admin; sem isso ninguém é admin
   adminCpfs: (env.ADMIN_CPFS ?? '').split(',').map((cpf) => cpf.replace(/\D/g, '')).filter(Boolean),
   db: {

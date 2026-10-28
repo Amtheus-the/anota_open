@@ -12,7 +12,11 @@ const METHODS = ['pix', 'cartao', 'dinheiro', 'outro']
 const PAGE_SIZE = 20
 
 // plano pago e dentro da validade
-const PAYING = "u.plan <> 'free' AND (u.plan_expires_at IS NULL OR u.plan_expires_at >= CURDATE())"
+const ACTIVE = '(u.plan_expires_at IS NULL OR u.plan_expires_at >= CURDATE())'
+const PAYING = `u.plan IN ('pro','premium') AND ${ACTIVE}`
+const TRIAL = `u.plan = 'trial' AND ${ACTIVE}`
+// teste que acabou sem virar assinatura, ou plano pago vencido/cancelado
+const LAPSED = `NOT (${PAYING}) AND NOT (${TRIAL})`
 
 const money = (value) => Math.round(Number(value ?? 0) * 100) / 100
 const count = (value) => Number(value ?? 0)
@@ -31,6 +35,8 @@ router.get('/overview', async (_req, res) => {
       COALESCE(SUM(created_at >= NOW() - INTERVAL 7 DAY), 0) AS week,
       COALESCE(SUM(created_at >= NOW() - INTERVAL 30 DAY), 0) AS month,
       COALESCE(SUM(${PAYING}), 0) AS paying,
+      COALESCE(SUM(${TRIAL}), 0) AS trial,
+      COALESCE(SUM(${TRIAL} AND u.plan_expires_at <= CURDATE() + INTERVAL 7 DAY), 0) AS trialEnding,
       COALESCE(SUM(${PAYING} AND u.plan_expires_at IS NOT NULL AND u.plan_expires_at <= CURDATE() + INTERVAL 7 DAY), 0) AS expiring
     FROM users u`)
   const payingByPlan = await query(`SELECT u.plan, COUNT(*) AS n FROM users u WHERE ${PAYING} GROUP BY u.plan`)
@@ -76,13 +82,16 @@ router.get('/overview', async (_req, res) => {
       week: count(users.week),
       month: count(users.month),
       paying,
-      free: total - paying,
+      trial: count(users.trial),
+      trialEnding: count(users.trialEnding),
+      lapsed: total - paying - count(users.trial),
       expiring: count(users.expiring),
       active7d: count(active.n),
       withBank: count(banks.n),
       onWhatsapp: count(whatsapp.n),
       withAgents: count(agents.n),
-      conversion: total > 0 ? Math.round((paying / total) * 1000) / 10 : 0,
+      // de quem já terminou o teste, quantos assinaram
+      conversion: total - count(users.trial) > 0 ? Math.round((paying / (total - count(users.trial))) * 1000) / 10 : 0,
     },
     messages: { total: count(messages.total), week: count(messages.week) },
     revenue: {
@@ -109,13 +118,15 @@ router.get('/users', async (req, res) => {
     params.push(...Array(4).fill(`%${search}%`))
   }
   if (filter === 'paying') where.push(`(${PAYING})`)
-  if (filter === 'free') where.push(`NOT (${PAYING})`)
+  if (filter === 'trial') where.push(`(${TRIAL})`)
+  if (filter === 'lapsed') where.push(`(${LAPSED})`)
   const clause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''
 
   const [{ n }] = await query(`SELECT COUNT(*) AS n FROM users u ${clause}`, params)
   const rows = await query(
     `SELECT u.id, u.name, u.email, u.phone, u.created_at, u.plan, u.plan_expires_at,
       (${PAYING}) AS paying,
+      (${TRIAL}) AS trial,
       (SELECT COUNT(*) FROM connected_accounts c WHERE c.user_id = u.id AND c.status = 'connected') AS banks,
       (SELECT COUNT(*) FROM chat_messages m WHERE m.user_id = u.id AND m.role = 'user') AS messages,
       (SELECT MAX(m.created_at) FROM chat_messages m WHERE m.user_id = u.id) AS last_activity,
@@ -136,6 +147,7 @@ router.get('/users', async (req, res) => {
       plan: u.plan,
       planExpiresAt: u.plan_expires_at,
       paying: Boolean(Number(u.paying)),
+      trial: Boolean(Number(u.trial)),
       banks: count(u.banks),
       messages: count(u.messages),
       lastActivity: u.last_activity,

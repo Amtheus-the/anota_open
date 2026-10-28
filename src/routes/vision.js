@@ -1,12 +1,12 @@
 import { Router } from 'express'
-import { requireAuth } from '../middleware/auth.js'
+import { requireAuth, requireAccess } from '../middleware/auth.js'
 import { loadFinancials } from '../services/financial.js'
 import { buildCategories, buildCards } from '../services/visionCategories.js'
 import { demoInstallments } from '../services/demoData.js'
 import { buildVision, buildTransactions, buildInstallments, buildSubscriptions } from '../services/vision.js'
 
 const router = Router()
-router.use(requireAuth)
+router.use(requireAuth, requireAccess)
 
 // Tudo que a tela Vision mostra, numa chamada só
 router.get('/overview', async (req, res) => {

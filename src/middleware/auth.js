@@ -26,6 +26,21 @@ export function requireAuth(req, _res, next) {
 
 export const isAdminCpf = (cpf) => config.adminCpfs.includes(cpf)
 
+// Acesso ao produto: teste grátis ou plano pago dentro da validade (admins sempre entram).
+// plan: 'trial' | 'pro' | 'premium' | 'free' (free = sem plano, p.ex. cancelado)
+export const planActive = (user) =>
+  user.plan !== 'free' && (!user.plan_expires_at || String(user.plan_expires_at).slice(0, 10) >= new Date().toLocaleDateString('sv-SE'))
+
+export const hasAccess = (user) => isAdminCpf(user.cpf) || planActive(user)
+
+export async function requireAccess(req, _res, next) {
+  const [user] = await query('SELECT cpf, plan, plan_expires_at FROM users WHERE id = ?', [req.userId])
+  if (!user) return next(new HttpError(401, 'Conta não encontrada'))
+  if (hasAccess(user)) return next()
+  const trial = user.plan === 'trial'
+  next(new HttpError(402, trial ? 'Seu teste grátis acabou. Assine o plano Pro para continuar usando o Anota Grana.' : 'Você não tem um plano ativo. Assine o plano Pro para continuar usando o Anota Grana.'))
+}
+
 // Painel de administração: confere no banco (não no token) se o CPF da conta está em ADMIN_CPFS
 export async function requireAdmin(req, _res, next) {
   const [user] = await query('SELECT cpf FROM users WHERE id = ?', [req.userId])

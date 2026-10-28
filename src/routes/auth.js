@@ -1,7 +1,8 @@
 import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import { query } from '../db.js'
-import { signToken, verifyToken, requireAuth, isAdminCpf } from '../middleware/auth.js'
+import { signToken, verifyToken, requireAuth, isAdminCpf, planActive } from '../middleware/auth.js'
+import { config } from '../config.js'
 import { ensureUserName } from '../services/identity.js'
 import { sendCode, checkCode } from '../services/verification.js'
 import {
@@ -10,7 +11,9 @@ import {
 
 const router = Router()
 
-const publicUser = (u) => ({ id: u.id, name: u.name, cpf: u.cpf, phone: u.phone, email: u.email, isAdmin: isAdminCpf(u.cpf) })
+const publicUser = (u) => ({ id: u.id, name: u.name, cpf: u.cpf, phone: u.phone, email: u.email, isAdmin: isAdminCpf(u.cpf),
+  plan: u.plan, planExpiresAt: u.plan_expires_at ?? null, planActive: isAdminCpf(u.cpf) || planActive(u),
+})
 
 // Etapa 1 do cadastro: celular + CPF -> envia o código
 router.post('/register/start', async (req, res) => {
@@ -55,8 +58,8 @@ router.post('/register/complete', async (req, res) => {
 
   const passwordHash = await bcrypt.hash(password, 12)
   const result = await query(
-    'INSERT INTO users (cpf, phone, email, birth_date, password_hash) VALUES (?, ?, ?, ?, ?)',
-    [claims.cpf, claims.phone, email.toLowerCase(), birth, passwordHash],
+    "INSERT INTO users (cpf, phone, email, birth_date, password_hash, plan, plan_expires_at) VALUES (?, ?, ?, ?, ?, 'trial', DATE_ADD(CURDATE(), INTERVAL ? DAY))",
+    [claims.cpf, claims.phone, email.toLowerCase(), birth, passwordHash, config.trialDays],
   )
   const [user] = await query('SELECT * FROM users WHERE id = ?', [result.insertId])
   res.status(201).json({ token: signToken({ type: 'session', sub: user.id }), user: publicUser(user) })

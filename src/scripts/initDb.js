@@ -83,6 +83,8 @@ async function migratePlans(connection) {
   if (columns[0].n === 0) {
     await connection.query("ALTER TABLE users ADD COLUMN plan VARCHAR(20) NOT NULL DEFAULT 'free' AFTER password_hash, ADD COLUMN plan_expires_at DATE NULL AFTER plan")
     console.log('Colunas plan e plan_expires_at adicionadas.')
+    // quem já tinha conta ganha o teste grátis a partir de hoje
+    await connection.query("UPDATE users SET plan = 'trial', plan_expires_at = DATE_ADD(CURDATE(), INTERVAL 30 DAY)")
   }
 }
 

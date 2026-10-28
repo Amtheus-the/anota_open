@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { query } from '../db.js'
 import { config } from '../config.js'
-import { requireAuth } from '../middleware/auth.js'
+import { requireAuth, requireAccess } from '../middleware/auth.js'
 import * as pluggy from '../services/openFinance.js'
 import { HttpError } from '../utils/validators.js'
 import { ensureUserName } from '../services/identity.js'
@@ -32,7 +32,7 @@ router.get('/institutions', async (_req, res) => {
 })
 
 // 1) O usuário escolheu o banco e confirmou: cria o Item no fluxo OAuth
-router.post('/connections/start', async (req, res) => {
+router.post('/connections/start', requireAccess, async (req, res) => {
   const connectorId = Number(req.body.connectorId)
   const institutions = await pluggy.listInstitutions()
   const institution = institutions.find((i) => i.id === connectorId)

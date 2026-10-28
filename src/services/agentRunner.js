@@ -63,7 +63,7 @@ export async function runDueAgents() {
     const rows = await query(
       `SELECT a.id, a.user_id AS userId, a.agent_key AS agentKey, a.frequency, a.spend_limit AS spendLimit, u.phone
        FROM user_agents a JOIN users u ON u.id = a.user_id
-       WHERE a.active = 1 AND a.agent_key IS NOT NULL AND (a.last_run_date IS NULL OR a.last_run_date < ?)
+       WHERE a.active = 1 AND a.agent_key IS NOT NULL AND u.plan <> 'free' AND (u.plan_expires_at IS NULL OR u.plan_expires_at >= CURDATE()) AND (a.last_run_date IS NULL OR a.last_run_date < ?)
        ORDER BY a.user_id, a.id`,
       [today],
     )

@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { query } from '../db.js'
-import { requireAuth } from '../middleware/auth.js'
+import { requireAuth, requireAccess } from '../middleware/auth.js'
 import { safeFinancials, suggestionsFor } from '../services/financial.js'
 import { ownConversation, sendChatMessage } from '../services/chatService.js'
 import { HttpError } from '../utils/validators.js'
@@ -43,7 +43,7 @@ router.get('/suggestions', async (req, res) => {
 })
 
 // Envia uma mensagem. Sem conversationId, abre uma conversa nova.
-router.post('/messages', async (req, res) => {
+router.post('/messages', requireAccess, async (req, res) => {
   const message = String(req.body.message ?? '').trim()
   if (!message) throw new HttpError(400, 'Mensagem vazia')
   if (message.length > MAX_MESSAGE) throw new HttpError(400, `Mensagem longa demais (máx. ${MAX_MESSAGE})`)
