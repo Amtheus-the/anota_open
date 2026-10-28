@@ -7,6 +7,8 @@ export const config = {
   port: Number(env.PORT ?? 3000),
   frontendUrl: env.FRONTEND_URL ?? 'http://localhost:5173',
   isProd: env.NODE_ENV === 'production',
+  // CPFs (só dígitos, separados por vírgula) que acessam o painel /admin; sem isso ninguém é admin
+  adminCpfs: (env.ADMIN_CPFS ?? '').split(',').map((cpf) => cpf.replace(/\D/g, '')).filter(Boolean),
   db: {
     host: env.DB_HOST ?? 'localhost',
     port: Number(env.DB_PORT ?? 3306),

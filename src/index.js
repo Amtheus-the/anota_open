@@ -12,6 +12,7 @@ import logoRoutes from './routes/logo.js'
 import agentsRoutes from './routes/agents.js'
 import statusPage from './routes/status.js'
 import whatsappRoutes from './routes/whatsapp.js'
+import adminRoutes from './routes/admin.js'
 import { startAgentRunner } from './services/agentRunner.js'
 
 assertConfig()
@@ -68,6 +69,7 @@ app.use('/api/vision', visionRoutes)
 app.use('/api/logo', logoRoutes)
 app.use('/api/agents', agentsRoutes)
 app.use('/api/whatsapp', whatsappRoutes)
+app.use('/api/admin', adminRoutes)
 
 app.use((_req, res) => res.status(404).json({ error: 'Rota não encontrada' }))
 

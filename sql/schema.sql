@@ -6,7 +6,25 @@ CREATE TABLE IF NOT EXISTS users (
   name          VARCHAR(255) NULL,
   birth_date    DATE         NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
+  plan          VARCHAR(20)  NOT NULL DEFAULT 'free',
+  plan_expires_at DATE       NULL,
   created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Pagamentos dos planos (registrados à mão no painel /admin até existir cobrança automática)
+CREATE TABLE IF NOT EXISTS payments (
+  id      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id INT UNSIGNED NOT NULL,
+  plan    VARCHAR(20)  NOT NULL,
+  months  TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  amount  DECIMAL(10,2) NOT NULL,
+  method  VARCHAR(20)  NOT NULL DEFAULT 'pix',
+  status  ENUM('paid','refunded') NOT NULL DEFAULT 'paid',
+  note    VARCHAR(255) NULL,
+  paid_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_paid_at (paid_at),
+  INDEX idx_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Códigos de verificação enviados por WhatsApp/SMS (guardados só como hash)

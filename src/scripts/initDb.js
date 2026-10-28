@@ -74,9 +74,22 @@ async function migrateAgentRuns(connection) {
   }
 }
 
+// Bancos criados antes dos planos: acrescenta o plano e a validade em users
+async function migratePlans(connection) {
+  const [columns] = await connection.query(
+    "SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = ? AND table_name = 'users' AND column_name = 'plan'",
+    [database],
+  )
+  if (columns[0].n === 0) {
+    await connection.query("ALTER TABLE users ADD COLUMN plan VARCHAR(20) NOT NULL DEFAULT 'free' AFTER password_hash, ADD COLUMN plan_expires_at DATE NULL AFTER plan")
+    console.log('Colunas plan e plan_expires_at adicionadas.')
+  }
+}
+
 const connection = await connect()
 try {
   await connection.query(schema)
+  await migratePlans(connection)
   await migrateConversations(connection)
   await migrateWidgets(connection)
   await migrateAgentRuns(connection)

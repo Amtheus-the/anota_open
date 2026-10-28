@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import { query } from '../db.js'
-import { signToken, verifyToken, requireAuth } from '../middleware/auth.js'
+import { signToken, verifyToken, requireAuth, isAdminCpf } from '../middleware/auth.js'
 import { ensureUserName } from '../services/identity.js'
 import { sendCode, checkCode } from '../services/verification.js'
 import {
@@ -10,7 +10,7 @@ import {
 
 const router = Router()
 
-const publicUser = (u) => ({ id: u.id, name: u.name, cpf: u.cpf, phone: u.phone, email: u.email })
+const publicUser = (u) => ({ id: u.id, name: u.name, cpf: u.cpf, phone: u.phone, email: u.email, isAdmin: isAdminCpf(u.cpf) })
 
 // Etapa 1 do cadastro: celular + CPF -> envia o código
 router.post('/register/start', async (req, res) => {
