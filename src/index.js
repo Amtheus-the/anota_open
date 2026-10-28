@@ -16,6 +16,11 @@ import { startAgentRunner } from './services/agentRunner.js'
 assertConfig()
 
 const app = express()
+// diagnóstico de hospedagem: mostra nos logs se as requisições chegam ao app (pode sair quando o deploy estiver estável)
+app.use((req, _res, next) => {
+  console.log(`[req] ${req.method} ${req.url}`)
+  next()
+})
 app.disable('x-powered-by')
 // atrás do proxy da hospedagem o IP real vem em X-Forwarded-For; sem isso o rate limit enxerga um IP só
 // (não depende de NODE_ENV: se o painel da hospedagem esquecer a variável, o limite continua certo; TRUST_PROXY=0 desliga)
@@ -90,6 +95,19 @@ const server = app.listen(config.port, '0.0.0.0', (err) => {
 })
 // ajuda a descobrir, nos logs da hospedagem, se e por que o processo está sendo encerrado
 process.on('exit', (code) => console.log(`[servidor] processo encerrando (código ${code})`))
+process.on('beforeExit', () => console.log('[servidor] nada mais a fazer: o processo vai sair (beforeExit)'))
+process.on('uncaughtException', (err) => {
+  console.error('[servidor] erro não tratado:', err)
+  process.exit(1)
+})
+process.on('unhandledRejection', (err) => console.error('[servidor] promessa rejeitada sem tratamento:', err))
+// batimento nos primeiros 60s (sem segurar o processo vivo): se ele parar de aparecer, o processo morreu
+let beats = 0
+const heartbeat = setInterval(() => {
+  console.log(`[servidor] vivo há ${(++beats) * 5}s (pid ${process.pid})`)
+  if (beats >= 12) clearInterval(heartbeat)
+}, 5000)
+heartbeat.unref()
 process.on('SIGTERM', () => {
   console.log('[servidor] recebeu SIGTERM da hospedagem')
   process.exit(0)
