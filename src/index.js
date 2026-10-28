@@ -11,6 +11,7 @@ import visionRoutes from './routes/vision.js'
 import logoRoutes from './routes/logo.js'
 import agentsRoutes from './routes/agents.js'
 import statusPage from './routes/status.js'
+import whatsappRoutes from './routes/whatsapp.js'
 import { startAgentRunner } from './services/agentRunner.js'
 
 assertConfig()
@@ -66,6 +67,7 @@ app.use('/api/open-finance', openFinanceRoutes)
 app.use('/api/vision', visionRoutes)
 app.use('/api/logo', logoRoutes)
 app.use('/api/agents', agentsRoutes)
+app.use('/api/whatsapp', whatsappRoutes)
 
 app.use((_req, res) => res.status(404).json({ error: 'Rota não encontrada' }))
 

@@ -122,10 +122,17 @@ export async function askAssistant(history, financialContext = '') {
 
 // Versão com ferramentas: a IA pode pedir blocos visuais; eles são montados aqui com os dados reais.
 // Devolve { reply, widgets, steps, agents }.
-export async function askWithWidgets(history, financialContext, fin) {
+// No WhatsApp o usuário não vê os blocos visuais: a resposta precisa trazer os números no próprio texto.
+const WHATSAPP_PROMPT = `CANAL: o usuário está conversando pelo WhatsApp e NÃO vê os blocos visuais das ferramentas show_*. Chame as ferramentas
+normalmente para obter os números, mas escreva na resposta os valores e itens principais que ele precisaria ver (por exemplo as 3 a 5
+maiores categorias, os totais e as datas), em linhas curtas. Aqui você pode usar o negrito do WhatsApp (*assim*) e listas com "•".
+Seja objetivo: no máximo cerca de 1200 caracteres, sem enrolação.`
+
+export async function askWithWidgets(history, financialContext, fin, { channel = 'web' } = {}) {
   if (!config.openai.apiKey) throw new HttpError(503, 'OpenAI não configurada (OPENAI_API_KEY)')
 
   const messages = [{ role: 'system', content: SYSTEM_PROMPT }]
+  if (channel === 'whatsapp') messages.push({ role: 'system', content: WHATSAPP_PROMPT })
   if (financialContext) messages.push({ role: 'system', content: `Dados financeiros do usuário:
 ${financialContext}` })
   messages.push(...history)

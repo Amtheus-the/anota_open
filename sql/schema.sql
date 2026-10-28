@@ -79,6 +79,14 @@ CREATE TABLE IF NOT EXISTS user_agents (
   UNIQUE KEY uq_user_agent (user_id, name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Mensagens recebidas pelo WhatsApp já processadas (a W-API pode reenviar o mesmo aviso)
+CREATE TABLE IF NOT EXISTS whatsapp_inbound (
+  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  message_id VARCHAR(100) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_message (message_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Avisos já enviados pelos agentes (a chave identifica o fato, para não avisar duas vezes)
 CREATE TABLE IF NOT EXISTS agent_alerts (
   id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

@@ -6,7 +6,11 @@ export const whatsappConfigured = () => Boolean(config.whatsapp.instanceId && co
 
 // phone: celular brasileiro só com DDD + número (como fica no banco); o DDI 55 é acrescentado aqui
 export async function sendWhatsApp(phone, message) {
-  if (!whatsappConfigured()) throw new HttpError(503, 'WhatsApp não configurado (WHATSAPP_INSTANCE_ID e WHATSAPP_TOKEN no .env)')
+  if (!whatsappConfigured()) {
+    // em desenvolvimento, sem credenciais, a mensagem só aparece no console
+    if (!config.isProd) return console.log(`[dev] WhatsApp para ${phone}:\n${message}`)
+    throw new HttpError(503, 'WhatsApp não configurado (WHATSAPP_INSTANCE_ID e WHATSAPP_TOKEN no .env)')
+  }
 
   const { baseUrl, instanceId, token } = config.whatsapp
   let response

@@ -26,6 +26,8 @@ export const config = {
     baseUrl: env.WHATSAPP_API_URL || 'https://api.w-api.app',
     instanceId: env.WHATSAPP_INSTANCE_ID,
     token: env.WHATSAPP_TOKEN,
+    // segredo que vai na URL do webhook de mensagens recebidas (a W-API não assina as chamadas); sem ele o webhook fica desligado
+    webhookSecret: env.WHATSAPP_WEBHOOK_SECRET,
   },
   openFinance: {
     baseUrl: env.OPEN_FINANCE_BASE_URL || 'https://api.pluggy.ai',

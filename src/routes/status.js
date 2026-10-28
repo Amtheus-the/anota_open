@@ -2,7 +2,7 @@ import { pool } from '../db.js'
 import { config } from '../config.js'
 import { whatsappConfigured } from '../services/whatsapp.js'
 
-const TABLES = ['users', 'verification_codes', 'connected_accounts', 'conversations', 'chat_messages', 'user_agents', 'agent_alerts']
+const TABLES = ['users', 'verification_codes', 'connected_accounts', 'conversations', 'chat_messages', 'user_agents', 'agent_alerts', 'whatsapp_inbound']
 
 // dicas para o erro de banco mais comum; só o código do erro aparece na tela (nunca host, usuário ou senha)
 const DB_HINTS = {
@@ -54,6 +54,7 @@ export default async function statusPage(_req, res) {
     row('OpenAI (chat)', Boolean(config.openai.apiKey), config.openai.apiKey ? '' : 'falta OPENAI_API_KEY'),
     row('Pluggy (Open Finance)', Boolean(config.openFinance.clientId && config.openFinance.clientSecret), config.openFinance.clientId ? '' : 'falta OPEN_FINANCE_CLIENT_ID e OPEN_FINANCE_CLIENT_SECRET'),
     row('WhatsApp (W-API)', whatsappConfigured(), whatsappConfigured() ? '' : 'falta WHATSAPP_INSTANCE_ID e WHATSAPP_TOKEN: sem isso o cadastro não envia o código'),
+    row('Conversa pelo WhatsApp (webhook)', Boolean(config.whatsapp.webhookSecret), config.whatsapp.webhookSecret ? '' : 'falta WHATSAPP_WEBHOOK_SECRET: sem isso o Anota Grana não responde mensagens recebidas'),
     row('Endereço do site (CORS)', Boolean(process.env.FRONTEND_URL), process.env.FRONTEND_URL ? config.frontendUrl : 'FRONTEND_URL não definido: usando http://localhost:5173, o site publicado não conseguirá falar com a API'),
   ]
   const allOk = db.ok && tablesOk
