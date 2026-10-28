@@ -76,12 +76,17 @@ app.use((err, _req, res, _next) => {
 })
 
 // 0.0.0.0 de propósito: a Hostinger alerta que um endereço só local (127.0.0.1) não é alcançável de fora do contêiner
-app.listen(config.port, '0.0.0.0', (err) => {
+const server = app.listen(config.port, '0.0.0.0', (err) => {
   if (err) {
     console.error('[servidor] não consegui abrir a porta', config.port, err.code ?? '', err.message)
     process.exit(1)
   }
   console.log(`Anota Grana API na porta ${config.port} (${config.isProd ? 'produção' : 'desenvolvimento'}, PORT=${process.env.PORT ?? 'não definida'})`)
+  // diagnóstico de hospedagem: como o processo foi iniciado e quais variáveis de rede a plataforma entregou (sem segredos)
+  const networkVars = Object.entries(process.env)
+    .filter(([key]) => /^(PORT|HOST|HOSTNAME|.*PASSENGER.*|.*LSNODE.*|.*SOCKET.*|.*LISTEN.*|.*HOSTINGER.*)$/i.test(key))
+    .map(([key, value]) => `${key}=${value}`)
+  console.log(`[servidor] cwd=${process.cwd()} argv=${process.argv.slice(1).join(' ')} escutando=${JSON.stringify(server.address())} rede=[${networkVars.join(', ')}]`)
 })
 // ajuda a descobrir, nos logs da hospedagem, se e por que o processo está sendo encerrado
 process.on('exit', (code) => console.log(`[servidor] processo encerrando (código ${code})`))
