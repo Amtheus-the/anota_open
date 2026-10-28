@@ -55,6 +55,7 @@ export default async function statusPage(_req, res) {
     row('Pluggy (Open Finance)', Boolean(config.openFinance.clientId && config.openFinance.clientSecret), config.openFinance.clientId ? '' : 'falta OPEN_FINANCE_CLIENT_ID e OPEN_FINANCE_CLIENT_SECRET'),
     row('WhatsApp (W-API)', whatsappConfigured(), whatsappConfigured() ? '' : 'falta WHATSAPP_INSTANCE_ID e WHATSAPP_TOKEN: sem isso o cadastro não envia o código'),
     row('Conversa pelo WhatsApp (webhook)', Boolean(config.whatsapp.webhookSecret), config.whatsapp.webhookSecret ? '' : 'falta WHATSAPP_WEBHOOK_SECRET: sem isso o Anota Grana não responde mensagens recebidas'),
+    row('Painel admin (ADMIN_CPFS)', config.adminCpfs.length > 0, config.adminCpfs.length > 0 ? `${config.adminCpfs.length} CPF(s) com acesso; confira se não há espaço ou letra: ${config.adminCpfs.every((cpf) => cpf.length === 11) ? 'todos com 11 dígitos' : 'algum não tem 11 dígitos'}` : 'ADMIN_CPFS não definido: ninguém acessa o /admin'),
     row('Endereço do site (CORS)', Boolean(process.env.FRONTEND_URL), process.env.FRONTEND_URL ? config.frontendUrl : 'FRONTEND_URL não definido: usando http://localhost:5173, o site publicado não conseguirá falar com a API'),
   ]
   const allOk = db.ok && tablesOk
