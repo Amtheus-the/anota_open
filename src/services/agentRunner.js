@@ -1,4 +1,4 @@
-import { query } from '../db.js'
+import { pool, query } from '../db.js'
 import { loadFinancials } from './financial.js'
 import { sendWhatsApp, whatsappConfigured } from './whatsapp.js'
 import { RULES, scheduledHour } from './agentAlerts.js'
@@ -52,7 +52,13 @@ async function processUser(userId, phone, agents, today) {
 export async function runDueAgents() {
   if (running) return
   running = true
+  // A hospedagem pode subir mais de um processo da API: o lock do MySQL garante que só um deles rode o ciclo
+  // (senão o mesmo aviso sairia duas vezes). O lock vale enquanto esta conexão estiver aberta.
+  let lock = null
   try {
+    lock = await pool.getConnection()
+    const [[{ got }]] = await lock.query("SELECT GET_LOCK('anota_agent_runner', 0) AS got")
+    if (got !== 1) return
     const { today, hour } = brNow()
     const rows = await query(
       `SELECT a.id, a.user_id AS userId, a.agent_key AS agentKey, a.frequency, a.spend_limit AS spendLimit, u.phone
@@ -81,6 +87,10 @@ export async function runDueAgents() {
   } catch (err) {
     console.error('[agentes] falha no ciclo:', err.message)
   } finally {
+    if (lock) {
+      await lock.query("SELECT RELEASE_LOCK('anota_agent_runner')").catch(() => {})
+      lock.release()
+    }
     running = false
   }
 }

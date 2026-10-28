@@ -75,5 +75,17 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'Erro interno' })
 })
 
-app.listen(config.port, () => console.log(`Anota Grana API em http://localhost:${config.port}`))
+app.listen(config.port, (err) => {
+  if (err) {
+    console.error('[servidor] não consegui abrir a porta', config.port, err.code ?? '', err.message)
+    process.exit(1)
+  }
+  console.log(`Anota Grana API na porta ${config.port} (${config.isProd ? 'produção' : 'desenvolvimento'}, PORT=${process.env.PORT ?? 'não definida'})`)
+})
+// ajuda a descobrir, nos logs da hospedagem, se e por que o processo está sendo encerrado
+process.on('exit', (code) => console.log(`[servidor] processo encerrando (código ${code})`))
+process.on('SIGTERM', () => {
+  console.log('[servidor] recebeu SIGTERM da hospedagem')
+  process.exit(0)
+})
 startAgentRunner()
