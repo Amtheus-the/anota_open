@@ -106,7 +106,7 @@ router.get('/me/export', requireAuth, async (req, res) => {
   const [accounts, conversations, messages, agents, payments] = await Promise.all([
     query('SELECT institution, status, created_at FROM connected_accounts WHERE user_id = ?', [req.userId]),
     query('SELECT id, title, created_at, updated_at FROM conversations WHERE user_id = ? ORDER BY id', [req.userId]),
-    query('SELECT conversation_id, role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY id', [req.userId]),
+    query('SELECT conversation_id, role, content, widgets, created_at FROM chat_messages WHERE user_id = ? ORDER BY id', [req.userId]),
     query('SELECT name, text, frequency, spend_limit, active, created_at FROM user_agents WHERE user_id = ?', [req.userId]),
     query('SELECT plan, months, amount, method, status, paid_at FROM payments WHERE user_id = ? ORDER BY id', [req.userId]),
   ])
