@@ -110,15 +110,16 @@ router.get('/me/export', requireAuth, async (req, res) => {
     [req.userId],
   )
   if (!user) throw new HttpError(401, 'Conta não encontrada')
-  const [accounts, conversations, messages, agents, payments] = await Promise.all([
+  const [accounts, conversations, messages, agents, payments, categoryRules] = await Promise.all([
     query('SELECT institution, status, created_at FROM connected_accounts WHERE user_id = ?', [req.userId]),
     query('SELECT id, title, created_at, updated_at FROM conversations WHERE user_id = ? ORDER BY id', [req.userId]),
     query('SELECT conversation_id, role, content, widgets, created_at FROM chat_messages WHERE user_id = ? ORDER BY id', [req.userId]),
     query('SELECT name, text, frequency, spend_limit, active, created_at FROM user_agents WHERE user_id = ?', [req.userId]),
     query('SELECT plan, months, amount, method, status, paid_at FROM payments WHERE user_id = ? ORDER BY id', [req.userId]),
+    query('SELECT label, category_key, ignored, created_at FROM category_rules WHERE user_id = ?', [req.userId]),
   ])
   res.setHeader('Content-Disposition', 'attachment; filename="meus-dados-anota-grana.json"')
-  res.json({ exportedAt: new Date().toISOString(), user, connectedAccounts: accounts, conversations, messages, agents, payments })
+  res.json({ exportedAt: new Date().toISOString(), user, connectedAccounts: accounts, conversations, messages, agents, payments, categoryRules })
 })
 
 // LGPD, art. 18: exclusão da conta. Pede a senha, revoga os bancos na Pluggy e apaga tudo (o histórico de

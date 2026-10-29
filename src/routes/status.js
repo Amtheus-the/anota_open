@@ -2,7 +2,7 @@ import { pool } from '../db.js'
 import { config } from '../config.js'
 import { whatsappConfigured } from '../services/whatsapp.js'
 
-const TABLES = ['users', 'verification_codes', 'connected_accounts', 'conversations', 'chat_messages', 'user_agents', 'agent_alerts', 'whatsapp_inbound', 'payments', 'subscriptions']
+const TABLES = ['users', 'verification_codes', 'connected_accounts', 'conversations', 'chat_messages', 'user_agents', 'agent_alerts', 'whatsapp_inbound', 'payments', 'subscriptions', 'category_rules']
 
 // dicas para o erro de banco mais comum; só o código do erro aparece na tela (nunca host, usuário ou senha)
 const DB_HINTS = {

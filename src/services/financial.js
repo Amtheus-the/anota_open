@@ -1,6 +1,7 @@
 import { query } from '../db.js'
 import * as pluggy from './openFinance.js'
 import { bankFrom } from './banks.js'
+import { loadRules, applyRules } from './categoryRules.js'
 
 const CACHE_MS = 2 * 60 * 1000
 const PERIOD_DAYS = 90
@@ -83,7 +84,8 @@ export async function loadFinancials(userId) {
 }
 
 async function fetchFinancials(userId) {
-
+  // regras de categoria do usuário (Prisma); se a tabela ainda não existir, segue sem elas
+  const rules = await loadRules(userId).catch(() => new Map())
   const connections = await query(
     "SELECT id, institution, provider_item_id FROM connected_accounts WHERE user_id = ? AND status = 'connected'",
     [userId],
@@ -150,6 +152,7 @@ async function fetchFinancials(userId) {
   const collapsed = cancelRefunds(transactions)
   transactions.length = 0
   transactions.push(...collapsed)
+  applyRules(transactions, rules)
   transactions.sort((a, b) => (a.date < b.date ? 1 : -1))
 
   const data = { connections, accounts, transactions, syncedAt, loadedAt: new Date().toISOString() }

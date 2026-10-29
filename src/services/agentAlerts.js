@@ -1,11 +1,13 @@
 import { isSpending } from './financial.js'
-import { dailySummary } from './dailySummary.js'
+import { merchantKey } from './categoryRules.js'
+import { categoryInfo } from './vision.js'
+import { dailySummary, cleanDescription } from './dailySummary.js'
 
 // Regras de cada agente. Cada uma recebe os dados financeiros e devolve avisos prontos:
 // { key, text }. A "key" identifica o fato avisado, para o mesmo aviso nunca ser enviado duas vezes.
 // Prisma (corrige categorias) conversa com o usuário e não tem aviso agendado.
 
-const brl = (n) => `R$ ${Number(n).toFixed(2).replace('.', ',')}`
+const brl = (n) => `R$ ${Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const dayMonth = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`
 const dayShift = (iso, days) => new Date(Date.parse(`${iso}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10)
 
@@ -22,7 +24,7 @@ export function faroAlerts({ transactions }, today) {
     const key = `faro:${a.description}:${Math.abs(a.amount).toFixed(2)}:${[a.date, twin.date].sort()[1]}`
     if (seen.has(key)) continue
     seen.add(key)
-    alerts.push({ key, text: `Cobrança repetida: ${a.description}, ${brl(Math.abs(a.amount))}, em ${dayMonth(twin.date < a.date ? twin.date : a.date)} e ${dayMonth(twin.date < a.date ? a.date : twin.date)}. Vale conferir se foi cobrado em duplicidade.` })
+    alerts.push({ key, text: `Cobrança repetida: ${cleanDescription(a.description)}, ${brl(Math.abs(a.amount))}, em ${dayMonth(twin.date < a.date ? twin.date : a.date)} e ${dayMonth(twin.date < a.date ? a.date : twin.date)}. Vale conferir se foi cobrado em duplicidade.` })
   }
   return alerts.slice(0, 3)
 }
@@ -59,7 +61,7 @@ export function juizoAlerts({ transactions }, today) {
     .slice(0, 2)
     .map((t) => ({
       key: `juizo:${t.accountId}:${t.date}:${t.description}:${Math.abs(t.amount).toFixed(2)}`,
-      text: `${brl(Math.abs(t.amount))} em ${t.description} no dia ${dayMonth(t.date)}. Isso é bem acima do seu normal. Era necessário mesmo?`,
+      text: `${brl(Math.abs(t.amount))} em ${cleanDescription(t.description)} no dia ${dayMonth(t.date)}. Isso é bem acima do seu normal. Era necessário mesmo?`,
     }))
 }
 
@@ -93,6 +95,30 @@ export function scheduledHour(frequency) {
   return hour >= 0 && hour <= 23 ? hour : 9
 }
 
+// Prisma: toda segunda-feira, pergunta sobre os estabelecimentos que ele não conseguiu classificar bem
+// (Compras, Serviços, Transferências ou sem categoria), sem regra ainda e com gasto relevante nos últimos 30 dias
+const GENERIC = new Set(['Compras', 'Serviços', 'Outros', 'Transferências'])
+export function prismaAlerts({ transactions }, today) {
+  if (new Date(`${today}T12:00:00Z`).getUTCDay() !== 1) return []
+  const since = dayShift(today, -30)
+  const merchants = new Map()
+  for (const t of transactions.filter((x) => isSpending(x) && !x.ruled && !x.installment && x.date >= since)) {
+    if (!GENERIC.has(categoryInfo(t).name)) continue
+    const key = merchantKey(t.description)
+    if (key.length < 3) continue
+    const item = merchants.get(key) ?? { key, label: cleanDescription(t.description), total: 0, count: 0 }
+    item.total += Math.abs(t.amount)
+    item.count += 1
+    merchants.set(key, item)
+  }
+  const top = [...merchants.values()].filter((m) => m.total >= 50).sort((a, b) => b.total - a.total).slice(0, 3)
+  if (top.length === 0) return []
+  return [
+    ...top.map((m) => ({ key: `prisma:${m.key}`, text: `${m.label}: ${brl(m.total)} (${m.count} ${m.count > 1 ? 'vezes' : 'vez'}). Qual é a categoria certa?` })),
+    { key: `prisma:dica:${today}`, text: 'Responda aqui com algo como "Mercadinho Zé é Alimentação" ou "Pix para a Maria não é gasto", e eu aprendo.' },
+  ]
+}
+
 // Horário do aviso em minutos desde a meia-noite ("às 9h" = 540, "18h30" ou "18:30" = 1110); padrão 9h
 export function scheduledMinutes(frequency) {
   const m = /(\d{1,2})\s*(?:h\s*(\d{2})?|:(\d{2}))/i.exec(String(frequency ?? ''))
@@ -107,5 +133,6 @@ export const RULES = {
   juizo: { title: 'Juízo', needsData: true, run: (fin, today) => juizoAlerts(fin, today) },
   faisca: { title: 'Faísca', needsData: false, run: (fin, today) => faiscaAlerts(fin, today) },
   // o resumo é uma mensagem própria (não entra na lista de avisos): o agendador chama `summary`
+  prisma: { title: 'Prisma', needsData: true, run: (fin, today) => prismaAlerts(fin, today) },
   resumo: { title: 'Resumo', needsData: true, run: () => [], summary: (fin, today) => dailySummary(fin, today) },
 }

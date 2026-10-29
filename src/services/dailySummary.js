@@ -1,10 +1,13 @@
 import { isSpending } from './financial.js'
 import { groupLabel } from './visionCategories.js'
+import { cleanDescription } from '../utils/describe.js'
 
 // Resumo do dia por WhatsApp (agente "Resumo"): quanto gastou hoje, em quê, como o mês está em relação ao mês passado
 // e um alerta de cobrança repetida de hoje. Devolve o texto pronto, ou null se não há conta conectada.
 
 const brl = (n) => `R$ ${Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+export { cleanDescription }
+
 const dayMonth = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`
 
 function previousMonth(month) {
@@ -21,7 +24,7 @@ function repeatedToday(spending, today) {
   for (const a of todays) {
     const twin = spending.find((b) => b !== a && !b.installment && b.description === a.description &&
       Math.abs(Math.abs(b.amount) - Math.abs(a.amount)) < 0.005 && b.date < today && Date.parse(`${today}T12:00:00Z`) - Date.parse(`${b.date}T12:00:00Z`) <= 86_400_000)
-    if (twin) return `*Atenção:* ${a.description} foi cobrado 2 vezes (${brl(Math.abs(a.amount))}), em ${dayMonth(twin.date)} e ${dayMonth(today)}. Vale conferir se foi duplicado.`
+    if (twin) return `*Atenção:* ${cleanDescription(a.description)} foi cobrado 2 vezes (${brl(Math.abs(a.amount))}), em ${dayMonth(twin.date)} e ${dayMonth(today)}. Vale conferir se foi duplicado.`
   }
   return null
 }

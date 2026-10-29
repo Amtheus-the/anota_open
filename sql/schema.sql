@@ -137,3 +137,16 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   INDEX idx_user (user_id),
   INDEX idx_customer (asaas_customer_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Regras do Prisma: o usuário corrige a categoria de um estabelecimento (ou diz que não é gasto)
+CREATE TABLE IF NOT EXISTS category_rules (
+  id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id      INT UNSIGNED NOT NULL,
+  merchant_key VARCHAR(100) NOT NULL,
+  label        VARCHAR(120) NOT NULL,
+  category_key VARCHAR(40)  NULL,
+  ignored      TINYINT(1)   NOT NULL DEFAULT 0,
+  created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_user_merchant (user_id, merchant_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

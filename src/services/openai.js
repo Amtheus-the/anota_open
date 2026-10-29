@@ -1,6 +1,7 @@
 import { config } from '../config.js'
 import { HttpError } from '../utils/validators.js'
 import { openAiTools, runTool } from './widgets.js'
+import { CATEGORY_NAMES, previewCorrection } from './categoryRules.js'
 
 const SYSTEM_PROMPT = `Você é o Anota Grana, um assistente de finanças pessoais em português do Brasil.
 Ajude o usuário a entender gastos, organizar o orçamento e tomar decisões com clareza.
@@ -34,6 +35,10 @@ saldo, fatura. Diga com franqueza se cabe no orçamento, quanto isso representa 
 citando os números reais do usuário. Termine com um próximo passo concreto. Percentuais só a partir dos números das ferramentas.
 PERSONALIDADE: o Anota Grana é uma raposa. Em respostas mais longas, faça UMA brincadeira curta e natural (toca, faro, rabo, caça),
 sem exagerar e sem atrapalhar a informação.
+CORREÇÃO DE CATEGORIAS (agente Prisma): quando o usuário disser que uma compra ou estabelecimento está na categoria errada ("o Mercadinho Zé é
+Alimentação", "esse Pix para a Maria não é gasto"), chame set_category com o nome como aparece no extrato e uma categoria da lista. Se não ficar
+claro qual estabelecimento, pergunte antes. Depois confirme em uma frase o que mudou (estabelecimento, categoria e quantas transações) e diga que
+vale para as próximas também. Os valores que você já mostrou nesta conversa não mudam sozinhos: avise que a nova categoria aparece nas próximas consultas.
 AGENTES: o app tem 6 agentes que o usuário pode ativar: Resumo (manda por WhatsApp, no fim do dia, o resumo do que ele gastou), Faro (cobranças suspeitas e duplicadas), Prisma (corrige categorias e
 aprende com o usuário), Teto (alerta quando os gastos passam do limite definido), Faísca (missões financeiras inesperadas) e
 Juízo (chama a atenção para gastos exagerados, sincero e irônico sem humilhar). Quando o usuário pedir "Crie o X ..." NÃO crie
@@ -59,6 +64,23 @@ const createAgentTool = {
         limit: { type: 'number', description: 'Só para o Teto: limite de gastos por mês em reais' },
       },
       required: ['agent'],
+    },
+  },
+}
+
+// Prisma: corrige a categoria de um estabelecimento ou diz que não é gasto (a regra é gravada pelo chatService)
+const setCategoryTool = {
+  type: 'function',
+  function: {
+    name: 'set_category',
+    description: 'Corrige a categoria de um estabelecimento ou pessoa nas transações do usuário, ou marca como "Não é gasto". Use quando ele disser que algo está na categoria errada ou que não é um gasto dele.',
+    parameters: {
+      type: 'object',
+      properties: {
+        search: { type: 'string', description: 'Nome do estabelecimento ou da pessoa, como aparece no extrato (ex.: "mercadinho ze", "movida")' },
+        category: { type: 'string', enum: CATEGORY_NAMES, description: 'Categoria correta, ou "Não é gasto" (ex.: Pix para si mesmo, para a família, entre contas)' },
+      },
+      required: ['search', 'category'],
     },
   },
 }
@@ -139,6 +161,7 @@ ${financialContext}` })
 
   const widgets = []
   const agents = []
+  const corrections = []
   let steps = 0
 
   for (let round = 0; round < 3; round++) {
@@ -150,7 +173,7 @@ ${financialContext}` })
         messages,
         temperature: 0.4,
         // na última volta a IA já tem os blocos e só precisa escrever
-        ...(round < 2 ? { tools: [...(fin.accounts.length > 0 ? openAiTools : []), createAgentTool] } : {}),
+        ...(round < 2 ? { tools: [...(fin.accounts.length > 0 ? [...openAiTools, setCategoryTool] : []), createAgentTool] } : {}),
       }),
       signal: AbortSignal.timeout(45_000),
     })
@@ -165,7 +188,7 @@ ${financialContext}` })
     if (calls.length === 0) {
       const reply = message?.content?.trim()
       if (!reply) throw new HttpError(502, 'Resposta vazia do assistente')
-      return { reply, widgets, steps, agents }
+      return { reply, widgets, steps, agents, corrections }
     }
 
     messages.push(message)
@@ -181,6 +204,18 @@ ${financialContext}` })
         const key = AGENT_KEYS.includes(args.agent) ? args.agent : null
         if (key) agents.push({ key, schedule: String(args.schedule ?? 'Todo dia às 9h').slice(0, 60), limit: Number(args.limit) > 0 ? Number(args.limit) : null })
         messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(key ? { ok: true, agent: key } : { ok: false, error: 'agente desconhecido' }) })
+        continue
+      }
+      if (call.function.name === 'set_category') {
+        const result = previewCorrection(fin, args)
+        if (result.ok) corrections.push({ merchants: result.merchants, target: result.target })
+        messages.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: JSON.stringify(result.ok
+            ? { ok: true, categoria: result.category, estabelecimentos: result.merchants.map((m) => ({ nome: m.label, transacoes: m.count, total: m.total })), observacao: 'A regra vale para todas as transações desse estabelecimento, passadas e futuras.' }
+            : { ok: false, error: result.error, exemplos: result.exemplos }),
+        })
         continue
       }
       const { widgets: built, summary } = runTool(call.function.name, args, fin)

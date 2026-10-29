@@ -1,6 +1,7 @@
 import { query } from '../db.js'
 import { askWithWidgets, generateTitle } from './openai.js'
-import { safeFinancials, summarize } from './financial.js'
+import { safeFinancials, summarize, clearFinancialsCache } from './financial.js'
+import { saveRules } from './categoryRules.js'
 import { followupsFor } from './widgets.js'
 import { upsertCatalogAgent } from './agents.js'
 import { HttpError } from '../utils/validators.js'
@@ -26,13 +27,17 @@ export async function sendChatMessage(userId, message, { conversationId = null, 
 
   // saldos e transações das contas conectadas entram no contexto do assistente
   const fin = await safeFinancials(userId)
-  const { reply, widgets, steps, agents: requested } = await askWithWidgets(history, summarize(fin), fin, { channel })
+  const { reply, widgets, steps, agents: requested, corrections } = await askWithWidgets(history, summarize(fin), fin, { channel })
   // agentes que a IA criou nesta resposta já ficam salvos no banco
   const agents = []
   for (const request of requested) {
     const saved = await upsertCatalogAgent(userId, request)
     if (saved) agents.push(saved)
   }
+
+  // correções de categoria (Prisma) pedidas nesta resposta: viram regra e valem daqui para a frente
+  for (const correction of corrections) await saveRules(userId, correction.merchants, correction.target)
+  if (corrections.length > 0) clearFinancialsCache(userId)
 
   // a conversa só é criada depois da resposta, para um erro da IA não deixar conversa vazia na lista
   let id = existing?.id
