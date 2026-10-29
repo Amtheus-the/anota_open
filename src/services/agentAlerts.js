@@ -132,7 +132,7 @@ export const RULES = {
   teto: { title: 'Teto', needsData: true, run: (fin, today, agent) => tetoAlerts(fin, today, agent.spendLimit) },
   juizo: { title: 'Juízo', needsData: true, run: (fin, today) => juizoAlerts(fin, today) },
   faisca: { title: 'Faísca', needsData: false, run: (fin, today) => faiscaAlerts(fin, today) },
-  // o resumo é uma mensagem própria (não entra na lista de avisos): o agendador chama `summary`
+  // o fechamento do dia (Luno) é uma mensagem própria (não entra na lista de avisos): o agendador chama `summary`
   prisma: { title: 'Prisma', needsData: true, run: (fin, today) => prismaAlerts(fin, today) },
-  resumo: { title: 'Resumo', needsData: true, run: () => [], summary: (fin, today) => dailySummary(fin, today) },
+  luno: { title: 'Luno', needsData: true, run: () => [], summary: (fin, today) => dailySummary(fin, today) },
 }

@@ -134,6 +134,15 @@ async function migrateOptout(connection) {
   }
 }
 
+// O agente "Resumo" passou a se chamar "Luno": migra os que já foram criados
+async function migrateLuno(connection) {
+  const [result] = await connection.query(
+    "UPDATE user_agents SET agent_key = 'luno', name = 'Luno', text = ? WHERE agent_key = 'resumo'",
+    ['Envia no fim do dia um resumo dos gastos, entradas e movimentações financeiras'],
+  )
+  if (result.affectedRows > 0) console.log(`Agente Resumo renomeado para Luno (${result.affectedRows}).`)
+}
+
 const connection = await connect()
 try {
   await connection.query(schema)
@@ -141,6 +150,7 @@ try {
   await migrateLegal(connection)
   await migrateBilling(connection)
   await migrateOptout(connection)
+  await migrateLuno(connection)
   await migrateConversations(connection)
   await migrateWidgets(connection)
   await migrateAgentRuns(connection)

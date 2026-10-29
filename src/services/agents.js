@@ -7,7 +7,7 @@ export const CATALOG = {
   teto: { name: 'Teto', text: 'Alerta quando os gastos ultrapassam os limites definidos' },
   faisca: { name: 'Faísca', text: 'Cria missões financeiras inesperadas' },
   juizo: { name: 'Juízo', text: 'Chama a atenção para gastos exagerados ou incompatíveis com o orçamento' },
-  resumo: { name: 'Resumo', text: 'Manda no fim do dia um resumo do que você gastou', defaultSchedule: 'Todo dia às 18h30' },
+  luno: { name: 'Luno', text: 'Envia no fim do dia um resumo dos gastos, entradas e movimentações financeiras', defaultSchedule: 'Todo dia às 18h30' },
 }
 
 const COLUMNS = 'id, agent_key AS agentKey, name, text, frequency, spend_limit AS spendLimit, active'

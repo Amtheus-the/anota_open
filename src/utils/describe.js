@@ -3,5 +3,6 @@ export function cleanDescription(raw) {
   const text = String(raw ?? '').trim()
   const [kind, name] = text.split('|').map((part) => part.trim())
   if (!name) return text
-  return /pix/i.test(kind) ? `Pix para ${name}` : name
+  if (!/pix/i.test(kind)) return name
+  return /recebid/i.test(kind) ? `Pix de ${name}` : `Pix para ${name}`
 }

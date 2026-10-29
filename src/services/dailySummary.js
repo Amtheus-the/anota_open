@@ -2,8 +2,8 @@ import { isSpending } from './financial.js'
 import { groupLabel } from './visionCategories.js'
 import { cleanDescription } from '../utils/describe.js'
 
-// Resumo do dia por WhatsApp (agente "Resumo"): quanto gastou hoje, em quê, como o mês está em relação ao mês passado
-// e um alerta de cobrança repetida de hoje. Devolve o texto pronto, ou null se não há conta conectada.
+// Fechamento do dia por WhatsApp (agente "Luno"): quanto gastou e entrou hoje, em quê, o saldo, como o mês está em relação
+// ao mês passado e um alerta de cobrança repetida de hoje. Devolve o texto pronto, ou null se não há conta conectada.
 
 const brl = (n) => `R$ ${Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 export { cleanDescription }
@@ -34,10 +34,10 @@ export function dailySummary({ accounts, transactions }, today) {
   const spending = transactions.filter(isSpending)
 
   const todays = spending.filter((t) => t.date === today)
-  const lines = [`*Resumo do dia · ${dayMonth(today)}*`, '']
+  const lines = [`*Luno · fechamento do dia ${dayMonth(today)}*`, '', 'O dia está terminando. Deixa eu te mostrar como ficou seu dinheiro hoje.', '']
 
   if (todays.length === 0) {
-    lines.push('Hoje não vi nenhum gasto nas suas contas. Alguns bancos demoram para lançar: se aparecer algo depois, entra no resumo de amanhã.')
+    lines.push('Hoje não vi nenhum gasto nas suas contas. Alguns bancos demoram para lançar: se aparecer algo depois, entra no fechamento de amanhã.')
   } else {
     lines.push(`Hoje você gastou *${brl(sum(todays))}*.`)
     const byCategory = new Map()
@@ -47,6 +47,13 @@ export function dailySummary({ accounts, transactions }, today) {
     }
     const top = [...byCategory.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
     lines.push(top.map(([name, total]) => `${name} ${brl(total)}`).join(' · '))
+  }
+
+  // entradas do dia (Pix recebido, salário...); pagamento de fatura não conta
+  const incomes = transactions.filter((t) => t.amount > 0 && t.date === today && !/credit card payment/i.test(t.category ?? ''))
+  if (incomes.length > 0) {
+    const biggest = [...incomes].sort((a, b) => b.amount - a.amount).slice(0, 2).map((t) => `${cleanDescription(t.description)} ${brl(t.amount)}`)
+    lines.push('', `Hoje entrou *${brl(sum(incomes))}*.`, biggest.join(' · '))
   }
 
   // o mês contra o mesmo trecho do mês passado (até o mesmo dia), em vez de um limite que o usuário não definiu
@@ -63,6 +70,9 @@ export function dailySummary({ accounts, transactions }, today) {
   } else {
     lines.push(`No mês você já gastou ${brl(monthSpent)}.`)
   }
+
+  const cash = accounts.filter((a) => a.type !== 'CREDIT')
+  if (cash.length > 0) lines.push(`Saldo nas contas: ${brl(cash.reduce((total, a) => total + Number(a.balance ?? 0), 0))}.`)
 
   const attention = repeatedToday(spending, today)
   if (attention) lines.push('', attention)
