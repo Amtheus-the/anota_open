@@ -138,7 +138,8 @@ router.get('/connections/:id/accounts', async (req, res) => {
 
 router.delete('/connections/:id', async (req, res) => {
   const connection = await ownConnection(req.userId, req.params.id)
-  // TODO: também revogar o consentimento na Pluggy (DELETE /items/:id)
+  // revoga o consentimento na Pluggy; se ela falhar, a conexão sai daqui mesmo assim
+  if (connection.provider_item_id) await pluggy.deleteItem(connection.provider_item_id).catch((err) => console.error('[pluggy] não revogou o item:', err.message))
   await query('DELETE FROM connected_accounts WHERE id = ?', [connection.id])
   clearFinancialsCache(req.userId)
   res.status(204).end()

@@ -88,10 +88,46 @@ async function migratePlans(connection) {
   }
 }
 
+// Aceite dos termos (data e versão) e pagamentos que sobrevivem à exclusão da conta (guarda fiscal)
+async function migrateLegal(connection) {
+  const [columns] = await connection.query(
+    "SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = ? AND table_name = 'users' AND column_name = 'terms_accepted_at'",
+    [database],
+  )
+  if (columns[0].n === 0) {
+    await connection.query('ALTER TABLE users ADD COLUMN terms_accepted_at DATETIME NULL AFTER plan_expires_at, ADD COLUMN terms_version VARCHAR(20) NULL AFTER terms_accepted_at')
+    console.log('Colunas terms_accepted_at e terms_version adicionadas.')
+  }
+  const [fks] = await connection.query(
+    "SELECT constraint_name AS name, delete_rule AS rule FROM information_schema.referential_constraints WHERE constraint_schema = ? AND table_name = 'payments' AND referenced_table_name = 'users'",
+    [database],
+  )
+  if (fks[0] && fks[0].rule !== 'SET NULL') {
+    await connection.query(`ALTER TABLE payments DROP FOREIGN KEY \`${fks[0].name}\``)
+    await connection.query('ALTER TABLE payments MODIFY user_id INT UNSIGNED NULL')
+    await connection.query('ALTER TABLE payments ADD FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL')
+    console.log('Pagamentos agora sobrevivem à exclusão da conta.')
+  }
+}
+
+// Pagamentos vindos do Asaas guardam o id da cobrança (evita contar o mesmo pagamento duas vezes)
+async function migrateBilling(connection) {
+  const [columns] = await connection.query(
+    "SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = ? AND table_name = 'payments' AND column_name = 'external_id'",
+    [database],
+  )
+  if (columns[0].n === 0) {
+    await connection.query('ALTER TABLE payments ADD COLUMN external_id VARCHAR(60) NULL AFTER note, ADD UNIQUE KEY uq_external (external_id)')
+    console.log('Coluna external_id adicionada em payments.')
+  }
+}
+
 const connection = await connect()
 try {
   await connection.query(schema)
   await migratePlans(connection)
+  await migrateLegal(connection)
+  await migrateBilling(connection)
   await migrateConversations(connection)
   await migrateWidgets(connection)
   await migrateAgentRuns(connection)

@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { pool, query } from '../db.js'
+import { config } from '../config.js'
 import { requireAuth, requireAdmin } from '../middleware/auth.js'
 import { HttpError } from '../utils/validators.js'
 
@@ -7,7 +8,7 @@ const router = Router()
 router.use(requireAuth, requireAdmin)
 
 // preços mensais de tabela (mesmos da página de planos)
-const PLAN_PRICES = { pro: 14.9, premium: 34.9 }
+const PLAN_PRICES = config.plans
 const METHODS = ['pix', 'cartao', 'dinheiro', 'outro']
 const PAGE_SIZE = 20
 
@@ -62,7 +63,7 @@ router.get('/overview', async (_req, res) => {
     FROM users WHERE created_at >= CURDATE() - INTERVAL 29 DAY GROUP BY k`)
   const recentPayments = await query(`
     SELECT p.id, p.plan, p.months, p.amount, p.method, p.status, p.paid_at, u.name, u.email
-    FROM payments p JOIN users u ON u.id = p.user_id ORDER BY p.id DESC LIMIT 10`)
+    FROM payments p LEFT JOIN users u ON u.id = p.user_id ORDER BY p.id DESC LIMIT 10`)
 
   const now = new Date()
   const months = Array.from({ length: 6 }, (_, i) => {

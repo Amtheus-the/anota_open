@@ -8,21 +8,25 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash VARCHAR(255) NOT NULL,
   plan          VARCHAR(20)  NOT NULL DEFAULT 'free',
   plan_expires_at DATE       NULL,
+  terms_accepted_at DATETIME NULL,
+  terms_version VARCHAR(20)  NULL,
   created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Pagamentos dos planos (registrados à mão no painel /admin até existir cobrança automática)
 CREATE TABLE IF NOT EXISTS payments (
   id      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id INT UNSIGNED NOT NULL,
+  user_id INT UNSIGNED NULL,
   plan    VARCHAR(20)  NOT NULL,
   months  TINYINT UNSIGNED NOT NULL DEFAULT 1,
   amount  DECIMAL(10,2) NOT NULL,
   method  VARCHAR(20)  NOT NULL DEFAULT 'pix',
   status  ENUM('paid','refunded') NOT NULL DEFAULT 'paid',
   note    VARCHAR(255) NULL,
+  external_id VARCHAR(60) NULL,
   paid_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_external (external_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
   INDEX idx_paid_at (paid_at),
   INDEX idx_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -113,4 +117,22 @@ CREATE TABLE IF NOT EXISTS agent_alerts (
   created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_agent_id) REFERENCES user_agents(id) ON DELETE CASCADE,
   UNIQUE KEY uq_agent_alert (user_agent_id, dedupe_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Assinaturas por Pix Automático (Asaas): uma autorização por tentativa de assinar
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id                      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id                 INT UNSIGNED NULL,
+  plan                    VARCHAR(20)  NOT NULL DEFAULT 'pro',
+  value                   DECIMAL(10,2) NOT NULL,
+  asaas_customer_id       VARCHAR(60)  NOT NULL,
+  asaas_authorization_id  VARCHAR(60)  NOT NULL,
+  status                  ENUM('pending','active','cancelled','refused','expired') NOT NULL DEFAULT 'pending',
+  created_at              TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  activated_at            DATETIME     NULL,
+  cancelled_at            DATETIME     NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE KEY uq_authorization (asaas_authorization_id),
+  INDEX idx_user (user_id),
+  INDEX idx_customer (asaas_customer_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -11,6 +11,17 @@ export const config = {
   isProd: env.NODE_ENV === 'production',
   // dias de teste grátis para quem cria a conta (não existe plano gratuito)
   trialDays: Number(env.TRIAL_DAYS ?? 30),
+  // versão vigente dos Termos de Uso e da Política de Privacidade (muda quando o texto muda; o aceite guarda esta versão)
+  termsVersion: '2026-10-29',
+  // preço mensal de cada plano (R$): a cobrança do Pix Automático e o MRR do painel usam estes valores
+  plans: { pro: 15.9, premium: 34.9 },
+  // Asaas (Pix Automático). Sem ASAAS_ENV=production usa o sandbox, onde nenhum dinheiro de verdade se move.
+  asaas: {
+    apiKey: env.ASAAS_API_KEY,
+    baseUrl: env.ASAAS_BASE_URL || (env.ASAAS_ENV === 'production' ? 'https://api.asaas.com' : 'https://api-sandbox.asaas.com'),
+    // segredo que o Asaas manda no cabeçalho asaas-access-token em cada webhook; sem ele o webhook fica desligado
+    webhookToken: env.ASAAS_WEBHOOK_TOKEN,
+  },
   // CPFs (só dígitos, separados por vírgula) que acessam o painel /admin; sem isso ninguém é admin
   adminCpfs: (env.ADMIN_CPFS ?? '').split(',').map((cpf) => cpf.replace(/\D/g, '')).filter(Boolean),
   db: {

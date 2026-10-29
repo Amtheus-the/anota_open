@@ -30,7 +30,7 @@ async function pluggyFetch(path, { method = 'GET', body, headers = {}, signal } 
     try { code = JSON.parse(detail).codeDescription ?? null } catch { /* corpo não era JSON */ }
     return { ok: false, status: response.status, code }
   }
-  return { ok: true, data: await response.json() }
+  return { ok: true, data: await response.json().catch(() => null) }
 }
 
 async function getApiKey(force = false) {
@@ -152,6 +152,11 @@ export function oauthAuthorization(item) {
   const p = item.parameter
   if (p && p.type === 'oauth' && p.data) return { url: p.data, expiresAt: p.expiresAt ?? null }
   return null
+}
+
+// Revoga o consentimento: apaga o Item (e os dados dele) na Pluggy
+export async function deleteItem(itemId) {
+  return pluggy(`/items/${encodeURIComponent(itemId)}`, { method: 'DELETE' })
 }
 
 export async function getItem(itemId) {
