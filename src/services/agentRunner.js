@@ -1,7 +1,7 @@
 import { pool, query } from '../db.js'
 import { loadFinancials } from './financial.js'
 import { sendWhatsApp, whatsappConfigured } from './whatsapp.js'
-import { RULES, scheduledHour } from './agentAlerts.js'
+import { RULES, scheduledMinutes } from './agentAlerts.js'
 
 const TICK_MS = 5 * 60 * 1000
 const GRACE_HOURS = 3 // se o servidor estava fora no horário, ainda avisa até 3h depois
@@ -15,7 +15,8 @@ function brNow() {
   const now = new Date()
   return {
     today: now.toLocaleDateString('sv-SE', { timeZone: TIMEZONE }),
-    hour: Number(new Intl.DateTimeFormat('en-GB', { timeZone: TIMEZONE, hour: 'numeric', hourCycle: 'h23' }).format(now)),
+    minutes: Number(new Intl.DateTimeFormat('en-GB', { timeZone: TIMEZONE, hour: 'numeric', hourCycle: 'h23' }).format(now)) * 60
+      + Number(new Intl.DateTimeFormat('en-GB', { timeZone: TIMEZONE, minute: 'numeric' }).format(now)),
   }
 }
 
@@ -27,7 +28,8 @@ async function processUser(userId, phone, agents, today) {
 
   const sections = []
   const sentKeys = [] // [agentId, key] confirmados só depois do envio
-  for (const agent of agents) {
+  const alertAgents = agents.filter((a) => !RULES[a.agentKey].summary)
+  for (const agent of alertAgents) {
     const rule = RULES[agent.agentKey]
     if (rule.needsData && !data) continue
     const done = new Set((await query('SELECT dedupe_key FROM agent_alerts WHERE user_agent_id = ?', [agent.id])).map((r) => r.dedupe_key))
@@ -44,8 +46,18 @@ async function processUser(userId, phone, agents, today) {
       await query('INSERT IGNORE INTO agent_alerts (user_agent_id, dedupe_key) VALUES (?, ?)', [agentId, key])
     }
   }
+  // o resumo do dia vai em mensagem separada, igual todo dia (se houver conta conectada)
+  let summarySent = false
+  const summaryAgent = agents.find((a) => RULES[a.agentKey].summary)
+  if (summaryAgent && data) {
+    const text = RULES[summaryAgent.agentKey].summary(data, today)
+    if (text) {
+      await sendWhatsApp(phone, text)
+      summarySent = true
+    }
+  }
   for (const agent of agents) await query('UPDATE user_agents SET last_run_date = ? WHERE id = ?', [today, agent.id])
-  return sections.length > 0
+  return sections.length > 0 || summarySent
 }
 
 // Roda os agentes ativos cujo horário chegou e que ainda não rodaram hoje
@@ -59,17 +71,17 @@ export async function runDueAgents() {
     lock = await pool.getConnection()
     const [[{ got }]] = await lock.query("SELECT GET_LOCK('anota_agent_runner', 0) AS got")
     if (got !== 1) return
-    const { today, hour } = brNow()
+    const { today, minutes } = brNow()
     const rows = await query(
       `SELECT a.id, a.user_id AS userId, a.agent_key AS agentKey, a.frequency, a.spend_limit AS spendLimit, u.phone
        FROM user_agents a JOIN users u ON u.id = a.user_id
-       WHERE a.active = 1 AND a.agent_key IS NOT NULL AND u.plan <> 'free' AND (u.plan_expires_at IS NULL OR u.plan_expires_at >= CURDATE()) AND (a.last_run_date IS NULL OR a.last_run_date < ?)
+       WHERE a.active = 1 AND a.agent_key IS NOT NULL AND u.whatsapp_optout_at IS NULL AND u.plan <> 'free' AND (u.plan_expires_at IS NULL OR u.plan_expires_at >= CURDATE()) AND (a.last_run_date IS NULL OR a.last_run_date < ?)
        ORDER BY a.user_id, a.id`,
       [today],
     )
     const due = rows.filter((a) => {
-      const at = scheduledHour(a.frequency)
-      return RULES[a.agentKey] && hour >= at && hour < at + GRACE_HOURS
+      const at = scheduledMinutes(a.frequency)
+      return RULES[a.agentKey] && minutes >= at && minutes < at + GRACE_HOURS * 60
     })
 
     const byUser = new Map()

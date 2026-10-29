@@ -28,6 +28,12 @@ function allowed(key, ms) {
 const sha = (value) => crypto.createHash('sha256').update(String(value)).digest()
 const secretMatches = (given) => Boolean(config.whatsapp.webhookSecret) && crypto.timingSafeEqual(sha(given), sha(config.whatsapp.webhookSecret))
 
+// Comandos que o cliente manda para parar ou voltar a receber avisos (lembretes e alertas dos agentes).
+// Só vale a mensagem inteira (sem acento nem pontuação), para não confundir com uma pergunta normal.
+const STOP_WORDS = new Set(['parar', 'pare', 'stop', 'parar avisos', 'parar lembretes'])
+const RESUME_WORDS = new Set(['reativar', 'reativar avisos'])
+const commandOf = (text) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z ]/g, '').trim()
+
 const textOf = (content) => content?.conversation ?? content?.extendedTextMessage?.text ?? null
 
 async function handleIncoming(payload) {
@@ -50,6 +56,17 @@ async function handleIncoming(payload) {
     return
   }
 
+  const text = String(textOf(payload.msgContent) ?? '').trim()
+  const command = commandOf(text)
+  if (STOP_WORDS.has(command) || RESUME_WORDS.has(command)) {
+    const stop = STOP_WORDS.has(command)
+    await query(`UPDATE users SET whatsapp_optout_at = ${stop ? 'NOW()' : 'NULL'} WHERE id = ?`, [user.id])
+    await sendWhatsApp(phone, stop
+      ? 'Pronto, não vou mais te mandar lembretes nem avisos dos agentes 🦊 Você ainda pode conversar comigo por aqui. Para voltar a receber, responda REATIVAR.'
+      : 'Combinado, os avisos estão ligados de novo 🦊')
+    return
+  }
+
   if (!hasAccess(user)) {
     if (allowed(`plan:${phone}`, 3_600_000)) {
       await sendWhatsApp(phone, `Seu teste grátis acabou 🦊 Assine o plano Pro em ${SIGNUP_URL} para continuar conversando comigo.`)
@@ -57,7 +74,6 @@ async function handleIncoming(payload) {
     return
   }
 
-  const text = String(textOf(payload.msgContent) ?? '').trim()
   if (!text) {
     if (allowed(`media:${phone}`, 60_000)) await sendWhatsApp(phone, 'Por enquanto eu só entendo mensagens de texto 🦊 Me escreva a sua pergunta.')
     return

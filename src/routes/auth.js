@@ -13,7 +13,7 @@ import {
 const router = Router()
 
 const publicUser = (u) => ({ id: u.id, name: u.name, cpf: u.cpf, phone: u.phone, email: u.email, isAdmin: isAdminCpf(u.cpf),
-  plan: u.plan, planExpiresAt: u.plan_expires_at ?? null, planActive: isAdminCpf(u.cpf) || planActive(u),
+  plan: u.plan, planExpiresAt: u.plan_expires_at ?? null, planActive: isAdminCpf(u.cpf) || planActive(u), whatsappAlerts: !u.whatsapp_optout_at,
 })
 
 const isAdult = (birth) => {
@@ -93,6 +93,13 @@ router.get('/me', requireAuth, async (req, res) => {
   if (!user) throw new HttpError(401, 'Conta não encontrada')
   if (!user.name) user.name = await ensureUserName(user.id)
   res.json({ user: publicUser(user) })
+})
+
+// Liga ou desliga os lembretes e avisos dos agentes por WhatsApp (o mesmo que responder PARAR / REATIVAR no WhatsApp)
+router.patch('/me/preferences', requireAuth, async (req, res) => {
+  if (typeof req.body?.whatsappAlerts !== 'boolean') throw new HttpError(400, 'Valor inválido')
+  await query(`UPDATE users SET whatsapp_optout_at = ${req.body.whatsappAlerts ? 'NULL' : 'NOW()'} WHERE id = ?`, [req.userId])
+  res.json({ whatsappAlerts: req.body.whatsappAlerts })
 })
 
 // LGPD, art. 18: cópia dos dados que o Anota Grana guarda sobre a pessoa (extratos e transações ficam no banco e na

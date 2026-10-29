@@ -1,4 +1,5 @@
 import { isSpending } from './financial.js'
+import { dailySummary } from './dailySummary.js'
 
 // Regras de cada agente. Cada uma recebe os dados financeiros e devolve avisos prontos:
 // { key, text }. A "key" identifica o fato avisado, para o mesmo aviso nunca ser enviado duas vezes.
@@ -92,9 +93,19 @@ export function scheduledHour(frequency) {
   return hour >= 0 && hour <= 23 ? hour : 9
 }
 
+// Horário do aviso em minutos desde a meia-noite ("às 9h" = 540, "18h30" ou "18:30" = 1110); padrão 9h
+export function scheduledMinutes(frequency) {
+  const m = /(\d{1,2})\s*(?:h\s*(\d{2})?|:(\d{2}))/i.exec(String(frequency ?? ''))
+  const hour = m ? Number(m[1]) : 9
+  const minute = m ? Number(m[2] ?? m[3] ?? 0) : 0
+  return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59 ? hour * 60 + minute : 9 * 60
+}
+
 export const RULES = {
   faro: { title: 'Faro', needsData: true, run: (fin, today) => faroAlerts(fin, today) },
   teto: { title: 'Teto', needsData: true, run: (fin, today, agent) => tetoAlerts(fin, today, agent.spendLimit) },
   juizo: { title: 'Juízo', needsData: true, run: (fin, today) => juizoAlerts(fin, today) },
   faisca: { title: 'Faísca', needsData: false, run: (fin, today) => faiscaAlerts(fin, today) },
+  // o resumo é uma mensagem própria (não entra na lista de avisos): o agendador chama `summary`
+  resumo: { title: 'Resumo', needsData: true, run: () => [], summary: (fin, today) => dailySummary(fin, today) },
 }

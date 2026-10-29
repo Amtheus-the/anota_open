@@ -122,12 +122,25 @@ async function migrateBilling(connection) {
   }
 }
 
+// Quem responde PARAR no WhatsApp (ou desliga no app) deixa de receber lembretes e avisos dos agentes
+async function migrateOptout(connection) {
+  const [columns] = await connection.query(
+    "SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = ? AND table_name = 'users' AND column_name = 'whatsapp_optout_at'",
+    [database],
+  )
+  if (columns[0].n === 0) {
+    await connection.query('ALTER TABLE users ADD COLUMN whatsapp_optout_at DATETIME NULL AFTER terms_version')
+    console.log('Coluna whatsapp_optout_at adicionada.')
+  }
+}
+
 const connection = await connect()
 try {
   await connection.query(schema)
   await migratePlans(connection)
   await migrateLegal(connection)
   await migrateBilling(connection)
+  await migrateOptout(connection)
   await migrateConversations(connection)
   await migrateWidgets(connection)
   await migrateAgentRuns(connection)

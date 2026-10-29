@@ -7,6 +7,7 @@ export const CATALOG = {
   teto: { name: 'Teto', text: 'Alerta quando os gastos ultrapassam os limites definidos' },
   faisca: { name: 'Faísca', text: 'Cria missões financeiras inesperadas' },
   juizo: { name: 'Juízo', text: 'Chama a atenção para gastos exagerados ou incompatíveis com o orçamento' },
+  resumo: { name: 'Resumo', text: 'Manda no fim do dia um resumo do que você gastou', defaultSchedule: 'Todo dia às 18h30' },
 }
 
 const COLUMNS = 'id, agent_key AS agentKey, name, text, frequency, spend_limit AS spendLimit, active'
@@ -24,7 +25,7 @@ export async function upsertCatalogAgent(userId, { key, schedule, limit }) {
   await query(
     `INSERT INTO user_agents (user_id, agent_key, name, text, frequency, spend_limit, active) VALUES (?, ?, ?, ?, ?, ?, 1)
      ON DUPLICATE KEY UPDATE frequency = VALUES(frequency), spend_limit = VALUES(spend_limit), active = 1`,
-    [userId, key, base.name, base.text, schedule || 'Todo dia às 9h', limit ?? null],
+    [userId, key, base.name, base.text, schedule || base.defaultSchedule || 'Todo dia às 9h', limit ?? null],
   )
   const [row] = await query(`SELECT ${COLUMNS} FROM user_agents WHERE user_id = ? AND name = ?`, [userId, base.name])
   return format(row)

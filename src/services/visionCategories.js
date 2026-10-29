@@ -28,6 +28,13 @@ const GROUP_OF = {
   Lazer: 'lazer', Streaming: 'lazer', Assinaturas: 'lazer', Viagens: 'lazer', Bilhetes: 'lazer',
 }
 
+// Rótulo curto para mensagens (ex.: resumo do dia): o grupo ("Transporte", "Alimentação"); Finanças e Outros mostram a categoria
+export function groupLabel(t) {
+  const info = categoryInfo(t)
+  const key = GROUP_OF[info.name] ?? 'outros'
+  return key === 'financas' || key === 'outros' ? info.name : GROUPS[key].name
+}
+
 const SHORT_MONTHS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 
 // Vencimento seguinte: a Pluggy informa o último (já passado); o próximo é o mesmo dia nos meses seguintes

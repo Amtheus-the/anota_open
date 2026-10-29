@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
   plan_expires_at DATE       NULL,
   terms_accepted_at DATETIME NULL,
   terms_version VARCHAR(20)  NULL,
+  whatsapp_optout_at DATETIME NULL,
   created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
