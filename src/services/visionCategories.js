@@ -35,6 +35,12 @@ export function groupLabel(t) {
   return key === 'financas' || key === 'outros' ? info.name : GROUPS[key].name
 }
 
+Object.assign(GROUP_OF, {
+  Eletrônicos: 'compras', Roupas: 'compras', Presentes: 'compras', Pets: 'compras', Infantil: 'compras',
+  Beleza: 'saude', Academia: 'saude',
+  Seguros: 'financas', Impostos: 'financas', 'Tarifas bancárias': 'financas', Investimentos: 'financas', Cashback: 'financas',
+})
+
 const SHORT_MONTHS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 
 // Vencimento seguinte: a Pluggy informa o último (já passado); o próximo é o mesmo dia nos meses seguintes

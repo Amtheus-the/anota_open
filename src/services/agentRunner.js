@@ -1,7 +1,8 @@
 import { pool, query } from '../db.js'
-import { loadFinancials } from './financial.js'
+import { loadFinancials, refreshFinancials } from './financial.js'
 import { sendWhatsApp, whatsappConfigured } from './whatsapp.js'
 import { RULES, scheduledMinutes } from './agentAlerts.js'
+import { brazilDay } from './dailySummary.js'
 
 const TICK_MS = 5 * 60 * 1000
 const GRACE_HOURS = 3 // se o servidor estava fora no horário, ainda avisa até 3h depois
@@ -20,9 +21,12 @@ function brNow() {
   }
 }
 
-async function processUser(userId, phone, agents, today) {
+async function processUser(userId, phone, agents, today, minutes) {
   let fin = null
-  if (agents.some((a) => RULES[a.agentKey].needsData)) fin = await loadFinancials(userId)
+  if (agents.some((a) => RULES[a.agentKey].needsData)) {
+    // o fechamento do dia pede dados novos ao banco antes de calcular
+    fin = agents.some((a) => RULES[a.agentKey].summary) ? await refreshFinancials(userId) : await loadFinancials(userId)
+  }
   // sem conta conectada os agentes de dados não têm o que avisar
   const data = fin && fin.accounts.length > 0 ? fin : null
 
@@ -49,14 +53,29 @@ async function processUser(userId, phone, agents, today) {
   // o resumo do dia vai em mensagem separada, igual todo dia (se houver conta conectada)
   let summarySent = false
   const summaryAgent = agents.find((a) => RULES[a.agentKey].summary)
+  // O banco só manda os dados uma vez por dia (a MeuPluggy não aceita atualização sob demanda): se a atualização de hoje ainda
+  // não chegou, espera o próximo ciclo (sem marcar como rodado) e só fecha com aviso na última chance dentro da tolerância.
+  let waiting = false
   if (summaryAgent && data) {
-    const text = RULES[summaryAgent.agentKey].summary(data, today)
+    const lastChance = scheduledMinutes(summaryAgent.frequency) + GRACE_HOURS * 60 - 2 * (TICK_MS / 60_000)
+    waiting = Boolean(data.syncedAt) && brazilDay(data.syncedAt) < today && minutes < lastChance
+    if (waiting) console.log(`[luno] usuário ${userId}: o banco ainda não atualizou hoje (última: ${data.syncedAt}); espera o próximo ciclo`)
+  }
+  if (summaryAgent && data && !waiting) {
+    const text = RULES[summaryAgent.agentKey].summary(data, today, { since: summaryAgent.lastRunAt })
     if (text) {
       await sendWhatsApp(phone, text)
       summarySent = true
+      await query('UPDATE user_agents SET last_run_at = UTC_TIMESTAMP() WHERE id = ?', [summaryAgent.id])
+      // registro para conferir com o extrato: de quando são os dados e o que entrou em cada conta do cálculo
+      const todays = data.transactions.filter((t) => t.date === today)
+      console.log(`[luno] usuário ${userId} dados de ${data.syncedAt ?? 'sem data'} | hoje: ${todays.length} transações | último fechamento: ${summaryAgent.lastRunAt ? new Date(summaryAgent.lastRunAt).toISOString() : 'nenhum'}`)
     }
   }
-  for (const agent of agents) await query('UPDATE user_agents SET last_run_date = ? WHERE id = ?', [today, agent.id])
+  for (const agent of agents) {
+    if (waiting && agent === summaryAgent) continue
+    await query('UPDATE user_agents SET last_run_date = ? WHERE id = ?', [today, agent.id])
+  }
   return sections.length > 0 || summarySent
 }
 
@@ -73,7 +92,7 @@ export async function runDueAgents() {
     if (got !== 1) return
     const { today, minutes } = brNow()
     const rows = await query(
-      `SELECT a.id, a.user_id AS userId, a.agent_key AS agentKey, a.frequency, a.spend_limit AS spendLimit, u.phone
+      `SELECT a.id, a.user_id AS userId, a.agent_key AS agentKey, a.frequency, a.spend_limit AS spendLimit, a.last_run_at AS lastRunAt, u.phone
        FROM user_agents a JOIN users u ON u.id = a.user_id
        WHERE a.active = 1 AND a.agent_key IS NOT NULL AND u.whatsapp_optout_at IS NULL AND u.plan <> 'free' AND (u.plan_expires_at IS NULL OR u.plan_expires_at >= CURDATE()) AND (a.last_run_date IS NULL OR a.last_run_date < ?)
        ORDER BY a.user_id, a.id`,
@@ -85,11 +104,11 @@ export async function runDueAgents() {
     })
 
     const byUser = new Map()
-    for (const a of due) byUser.set(a.userId, [...(byUser.get(a.userId) ?? []), { ...a, spendLimit: a.spendLimit == null ? null : Number(a.spendLimit) }])
+    for (const a of due) byUser.set(a.userId, [...(byUser.get(a.userId) ?? []), { ...a, spendLimit: a.spendLimit == null ? null : Number(a.spendLimit), lastRunAt: a.lastRunAt ? Date.parse(`${String(a.lastRunAt).replace(' ', 'T')}Z`) : null }])
 
     for (const [userId, agents] of byUser) {
       try {
-        const sent = await processUser(userId, agents[0].phone, agents, today)
+        const sent = await processUser(userId, agents[0].phone, agents, today, minutes)
         if (sent) await sleep(PAUSE_MS)
       } catch (err) {
         // falha de envio ou da Pluggy: não marca como rodado, tenta de novo no próximo ciclo

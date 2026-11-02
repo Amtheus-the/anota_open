@@ -134,5 +134,5 @@ export const RULES = {
   faisca: { title: 'Faísca', needsData: false, run: (fin, today) => faiscaAlerts(fin, today) },
   // o fechamento do dia (Luno) é uma mensagem própria (não entra na lista de avisos): o agendador chama `summary`
   prisma: { title: 'Prisma', needsData: true, run: (fin, today) => prismaAlerts(fin, today) },
-  luno: { title: 'Luno', needsData: true, run: () => [], summary: (fin, today) => dailySummary(fin, today) },
+  luno: { title: 'Luno', needsData: true, run: () => [], summary: (fin, today, options) => dailySummary(fin, today, options) },
 }

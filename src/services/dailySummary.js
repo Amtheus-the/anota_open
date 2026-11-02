@@ -2,13 +2,27 @@ import { isSpending } from './financial.js'
 import { groupLabel } from './visionCategories.js'
 import { cleanDescription } from '../utils/describe.js'
 
-// Fechamento do dia por WhatsApp (agente "Luno"): quanto gastou e entrou hoje, em quê, o saldo, como o mês está em relação
-// ao mês passado e um alerta de cobrança repetida de hoje. Devolve o texto pronto, ou null se não há conta conectada.
+// Fechamento do dia por WhatsApp (agente "Luno"): quanto gastou e entrou hoje, em quê, o que chegou depois de dias anteriores,
+// o saldo, como o mês está em relação ao mês passado e um alerta de cobrança repetida de hoje.
+// Devolve o texto pronto, ou null se não há conta conectada.
+//
+// Por que existe "chegaram depois": a Pluggy busca os dados do banco uma vez por dia, então compras do dia 30 podem aparecer
+// só depois do fechamento do dia 30. Elas entram no total do mês (e baixam o saldo), mas não são "de hoje". Mostrar essas
+// compras à parte faz os números fecharem.
 
+const TIMEZONE = 'America/Sao_Paulo'
 const brl = (n) => `R$ ${Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 export { cleanDescription }
 
 const dayMonth = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`
+const brDay = (iso) => new Date(iso).toLocaleDateString('sv-SE', { timeZone: TIMEZONE })
+export { brDay as brazilDay }
+const stamp = (iso) => {
+  const d = new Date(iso)
+  const day = d.toLocaleDateString('pt-BR', { timeZone: TIMEZONE, day: '2-digit', month: '2-digit' })
+  const time = d.toLocaleTimeString('pt-BR', { timeZone: TIMEZONE, hour: '2-digit', minute: '2-digit' })
+  return `${day} às ${time}`
+}
 
 function previousMonth(month) {
   const [year, mon] = month.split('-').map(Number)
@@ -17,6 +31,9 @@ function previousMonth(month) {
 }
 
 const sum = (list) => list.reduce((total, t) => total + Math.abs(t.amount), 0)
+
+// dinheiro que só mudou de lugar (entre contas do mesmo titular, pagamento de fatura) não é entrada
+const isInternal = (t) => /credit card payment|transfer - internal|same person transfer/i.test(t.category ?? '')
 
 // Cobrança igual (mesma descrição e valor) em dias seguidos, em que a segunda é a de hoje
 function repeatedToday(spending, today) {
@@ -29,7 +46,8 @@ function repeatedToday(spending, today) {
   return null
 }
 
-export function dailySummary({ accounts, transactions }, today) {
+// since: instante (ms) do fechamento anterior; o que o banco lançou depois dele com data de dias anteriores é "chegou depois"
+export function dailySummary({ accounts, transactions, syncedAt }, today, { since = null } = {}) {
   if (!accounts || accounts.length === 0) return null
   const spending = transactions.filter(isSpending)
 
@@ -37,7 +55,7 @@ export function dailySummary({ accounts, transactions }, today) {
   const lines = [`*Luno · fechamento do dia ${dayMonth(today)}*`, '', 'O dia está terminando. Deixa eu te mostrar como ficou seu dinheiro hoje.', '']
 
   if (todays.length === 0) {
-    lines.push('Hoje não vi nenhum gasto nas suas contas. Alguns bancos demoram para lançar: se aparecer algo depois, entra no fechamento de amanhã.')
+    lines.push('Até a última atualização do seu banco, não há gastos lançados hoje.')
   } else {
     lines.push(`Hoje você gastou *${brl(sum(todays))}*.`)
     const byCategory = new Map()
@@ -49,8 +67,14 @@ export function dailySummary({ accounts, transactions }, today) {
     lines.push(top.map(([name, total]) => `${name} ${brl(total)}`).join(' · '))
   }
 
-  // entradas do dia (Pix recebido, salário...); pagamento de fatura não conta
-  const incomes = transactions.filter((t) => t.amount > 0 && t.date === today && !/credit card payment/i.test(t.category ?? ''))
+  // gastos de dias anteriores que o banco só lançou depois do último fechamento
+  const late = since ? spending.filter((t) => t.date < today && t.createdAt && Date.parse(t.createdAt) > since) : []
+  if (late.length > 0) {
+    lines.push('', `Chegaram depois, com data de dias anteriores: *${brl(sum(late))}* (${late.length} ${late.length > 1 ? 'lançamentos' : 'lançamento'}).`)
+  }
+
+  // entradas do dia (Pix recebido, salário...)
+  const incomes = transactions.filter((t) => t.amount > 0 && t.date === today && !isInternal(t))
   if (incomes.length > 0) {
     const biggest = [...incomes].sort((a, b) => b.amount - a.amount).slice(0, 2).map((t) => `${cleanDescription(t.description)} ${brl(t.amount)}`)
     lines.push('', `Hoje entrou *${brl(sum(incomes))}*.`, biggest.join(' · '))
@@ -76,6 +100,13 @@ export function dailySummary({ accounts, transactions }, today) {
 
   const attention = repeatedToday(spending, today)
   if (attention) lines.push('', attention)
+
+  // de quando são os dados: o banco só manda uma atualização por dia, e o que faltar aparece no próximo fechamento
+  if (syncedAt) {
+    lines.push('', brDay(syncedAt) >= today
+      ? `Dados do seu banco atualizados em ${stamp(syncedAt)}. Algo ainda pode entrar depois.`
+      : `Atenção: o seu banco ainda não enviou os dados de hoje (última atualização em ${stamp(syncedAt)}). O que faltar aparece amanhã, em "chegaram depois".`)
+  }
 
   lines.push('', 'Quer que eu detalhe? Responda aqui.')
   return lines.join('\n')

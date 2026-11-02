@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS user_agents (
   spend_limit DECIMAL(12,2) NULL,
   active     TINYINT(1) NOT NULL DEFAULT 1,
   last_run_date DATE NULL,
+  last_run_at DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE KEY uq_user_agent (user_id, name)

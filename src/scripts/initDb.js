@@ -143,6 +143,18 @@ async function migrateLuno(connection) {
   if (result.affectedRows > 0) console.log(`Agente Resumo renomeado para Luno (${result.affectedRows}).`)
 }
 
+// Instante do último fechamento do Luno (UTC): o que o banco lançar depois disso, com data antiga, aparece em "chegaram depois"
+async function migrateRunAt(connection) {
+  const [columns] = await connection.query(
+    "SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = ? AND table_name = 'user_agents' AND column_name = 'last_run_at'",
+    [database],
+  )
+  if (columns[0].n === 0) {
+    await connection.query('ALTER TABLE user_agents ADD COLUMN last_run_at DATETIME NULL AFTER last_run_date')
+    console.log('Coluna last_run_at adicionada.')
+  }
+}
+
 const connection = await connect()
 try {
   await connection.query(schema)
@@ -151,6 +163,7 @@ try {
   await migrateBilling(connection)
   await migrateOptout(connection)
   await migrateLuno(connection)
+  await migrateRunAt(connection)
   await migrateConversations(connection)
   await migrateWidgets(connection)
   await migrateAgentRuns(connection)

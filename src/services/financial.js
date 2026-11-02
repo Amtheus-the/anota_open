@@ -144,6 +144,8 @@ async function fetchFinancials(userId) {
           category: billPayment ? 'Credit card payment' : EATING_MCC.has(Number(t.creditCardMetadata?.payeeMCC)) ? 'Eating out' : t.category ?? null,
           categoryPt: t.categoryTranslated ?? null,
           installment: installmentOf(t),
+          createdAt: t.createdAt ?? null, // quando a Pluggy recebeu a transação do banco (pode ser depois da data dela)
+          status: t.status ?? null,
           billMonth: t.creditCardMetadata?.billForecastDate ?? null, // mês da fatura em que a compra vai cair
         })
       }
@@ -159,6 +161,25 @@ async function fetchFinancials(userId) {
   cache.set(userId, { data, expiresAt: Date.now() + CACHE_MS })
   lastGood.set(userId, data)
   return data
+}
+
+// Antes de um fechamento diário: pede ao banco (via Pluggy) os dados mais novos, se os últimos têm mais de uma hora,
+// e só então lê. Se a atualização falhar ou demorar, segue com o que já existe.
+export async function refreshFinancials(userId) {
+  const connections = await query("SELECT provider_item_id FROM connected_accounts WHERE user_id = ? AND status = 'connected'", [userId])
+  await Promise.all(connections.map(async (connection) => {
+    try {
+      const item = await pluggy.getItem(connection.provider_item_id)
+      if (item.connector?.id === 200) return // a MeuPluggy não aceita atualização sob demanda: só a sincronização diária da Pluggy
+      if (Date.now() - Date.parse(item.lastUpdatedAt ?? 0) < 3_600_000) return
+      const result = await pluggy.refreshItem(connection.provider_item_id)
+      console.log('[financeiro] atualização sob demanda:', result?.status ?? 'não terminou a tempo')
+    } catch (err) {
+      console.error('[financeiro] não consegui atualizar o item agora:', err.message)
+    }
+  }))
+  cache.delete(userId) // lastGood fica, como reserva se a Pluggy estiver fora
+  return loadFinancials(userId)
 }
 
 export function clearFinancialsCache(userId) {

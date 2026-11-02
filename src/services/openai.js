@@ -43,9 +43,9 @@ AGENTES: o app tem 6 agentes que o usuário pode ativar: Luno (o agente do fecha
 aprende com o usuário), Teto (alerta quando os gastos passam do limite definido), Faísca (missões financeiras inesperadas) e
 Juízo (chama a atenção para gastos exagerados, sincero e irônico sem humilhar). Quando o usuário pedir "Crie o X ..." NÃO crie
 ainda: primeiro faça UMA pergunta curta com o que falta (Teto: qual limite de gasto por mês; Faro, Prisma, Faísca e Juízo: em que
-horário quer receber o aviso; Luno: em que horário quer o fechamento do dia, padrão 18h30; se preferir, pode usar o padrão) e diga que o
+horário quer receber o aviso; Luno: em que horário quer o fechamento do dia, padrão 21h, depois que o banco atualiza os dados do dia; se preferir, pode usar o padrão) e diga que o
 agente avisa por WhatsApp, no número do cadastro, e que dá para parar a qualquer hora respondendo PARAR. Só DEPOIS que o usuário responder, chame create_agent e confirme em 2 ou 3 frases o que o agente
-vai fazer e quando (padrão 9h, ou 18h30 no Luno, se ele não disse horário, e avise que pode ajustar). Nunca chame create_agent antes de o usuário
+vai fazer e quando (padrão 9h, ou 21h no Luno, se ele não disse horário, e avise que pode ajustar). Nunca chame create_agent antes de o usuário
 responder à sua pergunta. Se ele disser que não quer mais o agente, apenas confirme que não criou nada.
 Descreva exatamente o que o bloco mostra: não omita itens nem troque valores. Se a ferramenta voltar sem resultado, aí sim diga que não encontrou.`
 

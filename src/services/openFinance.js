@@ -159,6 +159,19 @@ export async function deleteItem(itemId) {
   return pluggy(`/items/${encodeURIComponent(itemId)}`, { method: 'DELETE' })
 }
 
+// Pede à Pluggy para buscar os dados do banco agora (a sincronização automática é de 24 em 24 horas) e espera terminar.
+// Limite da API: uma vez por hora por item. Devolve o item atualizado, ou null se não terminou a tempo.
+export async function refreshItem(itemId, { timeoutMs = 60_000 } = {}) {
+  await pluggy(`/items/${encodeURIComponent(itemId)}`, { method: 'PATCH', body: {} })
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 4000))
+    const item = await getItem(itemId)
+    if (item.status !== 'UPDATING' && item.status !== 'LOGIN_IN_PROGRESS') return item
+  }
+  return null
+}
+
 export async function getItem(itemId) {
   return pluggy(`/items/${encodeURIComponent(itemId)}`)
 }
