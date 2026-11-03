@@ -3,7 +3,7 @@ import rateLimit from 'express-rate-limit'
 import { config } from '../config.js'
 import { requireAuth, requireAccess } from '../middleware/auth.js'
 import { HttpError } from '../utils/validators.js'
-import { APPS } from '../services/apps.js'
+import { APPS, deleteCalendarEvent } from '../services/apps.js'
 import { composioConfigured, listConnections, removeConnections, startConnection } from '../services/composio.js'
 
 // Apps conectados do usuário (Gmail etc.). O login em si acontece na Composio e no app de origem, numa janela à parte.
@@ -34,6 +34,14 @@ router.post('/:slug/connect', async (req, res) => {
   if (!composioConfigured()) throw new HttpError(503, 'As conexões com apps ainda não estão ativadas')
   const redirectUrl = await startConnection(req.userId, app.slug, `${config.frontendUrl}/apps/callback`)
   res.json({ redirectUrl })
+})
+
+// Desfazer um evento criado pelo chat (botão "Desfazer" do cartão do evento)
+router.delete('/googlecalendar/events/:eventId', async (req, res) => {
+  if (!composioConfigured()) throw new HttpError(503, 'As conexões com apps ainda não estão ativadas')
+  const result = await deleteCalendarEvent(req.userId, req.params.eventId, req.query.calendarId)
+  if (result.needsConnection) throw new HttpError(409, 'O Google Calendar não está conectado')
+  res.json({ ok: true })
 })
 
 router.delete('/:slug', async (req, res) => {

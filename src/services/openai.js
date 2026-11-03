@@ -3,7 +3,7 @@ import { HttpError } from '../utils/validators.js'
 import { openAiTools, runTool } from './widgets.js'
 import { CATEGORY_NAMES, previewCorrection } from './categoryRules.js'
 import { composioConfigured } from './composio.js'
-import { readGmailMessage, searchGmail } from './apps.js'
+import { calendarEvents, createCalendarEvent, deleteCalendarEvent, readGmailMessage, searchGmail } from './apps.js'
 
 const SYSTEM_PROMPT = `Você é o Anota Grana, um assistente de finanças pessoais em português do Brasil.
 Ajude o usuário a entender gastos, organizar o orçamento e tomar decisões com clareza.
@@ -58,6 +58,10 @@ Não pergunte qual e-mail abrir: leia você mesmo, com read_gmail_message, os at
 Cruze o que achou nos e-mails com os dados do banco (por exemplo, a fatura do cartão) e diga o que bate e o que não bate. Diga com franqueza o que não deu para ver
 (valor ou vencimento que não estão no e-mail, anexos que você não leu). Nunca invente valor ou data. Preencha "reason" sempre, em uma frase curta que o usuário lê antes de autorizar.
 Se a ferramenta devolver needs_connection, o usuário vê um cartão para autorizar o acesso: explique em 1 ou 2 frases o que vai fazer depois que ele autorizar e não chame a ferramenta de novo.
+AGENDA (Google Calendar): para ver compromissos use list_calendar_events (consulta todas as agendas dele; cite quais agendas foram vistas). Para "me lembra de..." ou criar um evento, use create_calendar_event:
+crie DIRETO, é só na agenda dele e dá para desfazer; NUNCA coloque convidados nem mande e-mail de convite. Use datas e horas de Brasília, calcule "amanhã" e dias da semana a partir do "Agora" informado, e confirme em 1 frase com dia, hora e o que foi gravado.
+Quando o lembrete for de uma conta, busque o valor e o vencimento reais nos dados do banco ou nos e-mails antes de criar, e ponha-os no título e na descrição. Para apagar, use delete_calendar_event com o id do evento.
+Se a ferramenta devolver needs_connection, o usuário vê o cartão para autorizar: explique em 1 frase e não repita a chamada.
 Descreva exatamente o que o bloco mostra: não omita itens nem troque valores. Se a ferramenta voltar sem resultado, aí sim diga que não encontrou.`
 
 // Agentes que o chat pode criar (o front guarda a lista; aqui só validamos qual foi escolhido)
@@ -123,6 +127,53 @@ const gmailTools = [
       name: 'read_gmail_message',
       description: 'Lê um e-mail por inteiro a partir do id devolvido por search_gmail.',
       parameters: { type: 'object', properties: { message_id: { type: 'string' }, reason: reasonParam }, required: ['message_id', 'reason'] },
+    },
+  },
+]
+
+// Google Calendar (via Composio): ver os compromissos e criar lembretes na agenda do próprio usuário
+const calendarTools = [
+  {
+    type: 'function',
+    function: {
+      name: 'list_calendar_events',
+      description: 'Lista os compromissos de TODAS as agendas do usuário entre duas datas (inclusive), em ordem.',
+      parameters: {
+        type: 'object',
+        properties: {
+          from: { type: 'string', description: 'Primeiro dia, AAAA-MM-DD' },
+          to: { type: 'string', description: 'Último dia (inclusive), AAAA-MM-DD. Para um dia só, igual a from.' },
+          reason: reasonParam,
+        },
+        required: ['from', 'to', 'reason'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_calendar_event',
+      description: 'Cria um evento ou lembrete na agenda principal do usuário, só dele (sem convidados). Fácil de desfazer: pode criar direto quando o usuário pediu.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Título curto. Para contas, inclua o valor (ex.: "Pagar fatura Nubank - R$ 507,91 (vence 09/11)")' },
+          start: { type: 'string', description: 'Início, AAAA-MM-DDTHH:MM, horário de Brasília' },
+          duration_minutes: { type: 'integer', description: 'Duração em minutos. Padrão 15.' },
+          description: { type: 'string', description: 'Detalhes úteis (valores, vencimento, de onde vem a informação)' },
+          reminders: { type: 'array', items: { type: 'integer' }, description: 'Avisos na tela, em minutos antes do início. Padrão [60, 0].' },
+          reason: reasonParam,
+        },
+        required: ['title', 'start', 'reason'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_calendar_event',
+      description: 'Apaga um evento que você criou ou listou, quando o usuário pedir para desfazer ou apagar.',
+      parameters: { type: 'object', properties: { event_id: { type: 'string' }, calendar_id: { type: 'string', description: 'calendarId do evento (padrão primary)' }, reason: reasonParam }, required: ['event_id', 'reason'] },
     },
   },
 ]
@@ -201,11 +252,16 @@ Não peça para conectar o Gmail nesta conversa e não diga que "não tem como":
 export async function askWithWidgets(history, financialContext, fin, { channel = 'web', userId = null, mode = 'chat' } = {}) {
   if (!config.openai.apiKey) throw new HttpError(503, 'OpenAI não configurada (OPENAI_API_KEY)')
   // apps conectados (Gmail) só no modo Computer do site: no chat normal e no WhatsApp o assistente sabe que não os tem
-  const gmailOn = composioConfigured() && userId != null && mode === 'computer' && channel === 'web'
+  const gmailOn = composioConfigured() && userId != null && mode === 'computer' && channel === 'web' // vale para todos os apps conectados
 
   const messages = [{ role: 'system', content: SYSTEM_PROMPT }]
   if (channel === 'whatsapp') messages.push({ role: 'system', content: WHATSAPP_PROMPT })
   if (composioConfigured() && !gmailOn) messages.push({ role: 'system', content: CHAT_MODE_PROMPT })
+  if (gmailOn) {
+    const now = new Date()
+    const agora = now.toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 16)
+    messages.push({ role: 'system', content: `Agora: ${agora} (horário de Brasília), ${now.toLocaleDateString('pt-BR', { weekday: 'long', timeZone: 'America/Sao_Paulo' })}.` })
+  }
   if (financialContext) messages.push({ role: 'system', content: `Dados financeiros do usuário:
 ${financialContext}` })
   messages.push(...history)
@@ -227,7 +283,7 @@ ${financialContext}` })
         messages,
         temperature: 0.4,
         // na última volta a IA já tem os blocos e só precisa escrever
-        ...(round < maxRounds - 1 ? { tools: [...(fin.accounts.length > 0 ? [...openAiTools, setCategoryTool] : []), createAgentTool, ...(gmailOn ? gmailTools : [])] } : {}),
+        ...(round < maxRounds - 1 ? { tools: [...(fin.accounts.length > 0 ? [...openAiTools, setCategoryTool] : []), createAgentTool, ...(gmailOn ? [...gmailTools, ...calendarTools] : [])] } : {}),
       }),
       signal: AbortSignal.timeout(45_000),
     })
@@ -305,6 +361,37 @@ ${financialContext}` })
           tool_call_id: call.id,
           content: JSON.stringify({ ok: true, emails: read, next_page_token: result.nextPageToken ?? null, total_estimado: result.total ?? null, observacao: read.length === 0 ? 'Nenhum e-mail encontrado com essa busca.' : 'Os textos são trechos. Se um e-mail parece ter valor ou vencimento que o trecho não mostra, chame read_gmail_message AGORA para ele (até 5 e-mails, sem perguntar ao usuário). Só diga que não aparece depois de ler o e-mail inteiro.' }),
         })
+        continue
+      }
+      if (call.function.name === 'list_calendar_events' || call.function.name === 'create_calendar_event' || call.function.name === 'delete_calendar_event') {
+        let result
+        try {
+          if (call.function.name === 'list_calendar_events') result = await calendarEvents(userId, { from: args.from, to: args.to })
+          else if (call.function.name === 'create_calendar_event') result = await createCalendarEvent(userId, { title: args.title, start: args.start, durationMinutes: args.duration_minutes, description: args.description, reminders: args.reminders })
+          else result = await deleteCalendarEvent(userId, args.event_id, args.calendar_id)
+        } catch (err) {
+          console.error('[agenda]', err.message)
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: false, error: 'Não consegui acessar a agenda agora' }) })
+          continue
+        }
+        if (result.needsConnection) {
+          if (!widgets.some((w) => w.type === 'connectApp' && w.app === 'googlecalendar')) widgets.push({ type: 'connectApp', title: 'Conectar o Google Calendar', app: 'googlecalendar', name: 'Google Calendar', reason: String(args.reason ?? 'para acessar a sua agenda').slice(0, 200) })
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ needs_connection: true, observacao: 'O usuário vê agora um cartão para autorizar o Google Calendar. Depois que ele autorizar, ele pede de novo.' }) })
+          continue
+        }
+        if (result.error) {
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: false, error: result.error }) })
+          continue
+        }
+        if (result.events) {
+          widgets.push({ type: 'calendarEvents', title: 'Compromissos na agenda', from: args.from, to: args.to, calendars: result.calendars, items: result.events.slice(0, 30), count: result.events.length })
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, agendas_consultadas: result.calendars, agendas_com_falha: result.failed, eventos: result.events, observacao: result.events.length === 0 ? 'Nenhum compromisso nesse período.' : undefined }) })
+        } else if (result.event) {
+          widgets.push({ type: 'calendarEvent', title: 'Evento criado na agenda', event: result.event })
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, criado: result.event }) })
+        } else {
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, apagado: true }) })
+        }
         continue
       }
       const { widgets: built, summary } = runTool(call.function.name, args, fin)
