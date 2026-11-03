@@ -74,7 +74,7 @@ router.get('/connections/:id/authorization', async (req, res) => {
 })
 
 router.get('/connections', async (req, res) => {
-  const listSql = 'SELECT id, institution, status, created_at FROM connected_accounts WHERE user_id = ? ORDER BY id DESC'
+  const listSql = 'SELECT id, institution, status, provider_item_id, created_at FROM connected_accounts WHERE user_id = ? ORDER BY id DESC'
   let rows = await query(listSql, [req.userId])
 
   // conexões ainda "pendentes" (ex.: a página foi recarregada no meio) são conferidas na Pluggy,
@@ -92,10 +92,17 @@ router.get('/connections', async (req, res) => {
 
   // o logo vem da lista de instituições (em cache); se ela falhar, a conexão aparece sem logo
   const institutions = await pluggy.listInstitutions().catch(() => [])
+  // a tela "Conexões bancárias" pede também de quando são os dados de cada banco (uma consulta à Pluggy por conexão)
+  let updatedAt = new Map()
+  if (req.query.details === '1') {
+    const items = await Promise.allSettled(rows.filter((row) => row.status === 'connected' && row.provider_item_id).map(async (row) => [row.id, (await pluggy.getItem(row.provider_item_id)).lastUpdatedAt ?? null]))
+    updatedAt = new Map(items.filter((r) => r.status === 'fulfilled').map((r) => r.value))
+  }
   res.json({
-    connections: rows.map((row) => ({
+    connections: rows.map(({ provider_item_id: _item, ...row }) => ({
       ...row,
       imageUrl: institutions.find((i) => i.name === row.institution)?.imageUrl ?? null,
+      lastUpdatedAt: updatedAt.get(row.id) ?? null,
     })),
   })
 })
