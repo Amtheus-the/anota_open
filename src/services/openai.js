@@ -50,8 +50,10 @@ agente avisa por WhatsApp, no número do cadastro, e que dá para parar a qualqu
 vai fazer e quando (padrão 9h, ou 21h no Luno, se ele não disse horário, e avise que pode ajustar). Nunca chame create_agent antes de o usuário
 responder à sua pergunta. Se ele disser que não quer mais o agente, apenas confirme que não criou nada.
 GMAIL: quando o usuário pedir algo que está nos e-mails dele (boletos, faturas, assinaturas, recibos, vencimentos, cobranças recusadas), use search_gmail.
-Pesquise a caixa de entrada com cuidado e por inteiro: faça várias buscas com a sintaxe do Gmail (por exemplo "boleto", "fatura", "vencimento", "cobrança",
-"newer_than:30d", "has:attachment") e, se houver next_page_token e ainda faltar ver e-mails, continue com page_token. Use read_gmail_message para ler um e-mail por inteiro.
+Pesquise a caixa de entrada com cuidado e por inteiro: use SEMPRE "queries" com várias buscas diferentes de uma vez, nunca uma palavra só.
+Para boletos, contas e vencimentos, no mínimo: "boleto", "fatura", "vencimento", "cobrança", "pagamento recusado", "segunda via", "nota fiscal" e "newer_than:60d has:attachment".
+Se o resultado vier com poucos e-mails (menos de 3), amplie as buscas (outros termos, remetentes que apareceram, períodos maiores) antes de concluir que não há nada.
+Se houver next_page_token numa busca única e ainda faltar ver e-mails, continue com page_token. Use read_gmail_message para ler um e-mail por inteiro.
 Cruze o que achou nos e-mails com os dados do banco (por exemplo, a fatura do cartão) e diga o que bate e o que não bate. Diga com franqueza o que não deu para ver
 (valor ou vencimento que não estão no e-mail, anexos que você não leu). Nunca invente valor ou data. Preencha "reason" sempre, em uma frase curta que o usuário lê antes de autorizar.
 Se a ferramenta devolver needs_connection, o usuário vê um cartão para autorizar o acesso: explique em 1 ou 2 frases o que vai fazer depois que ele autorizar e não chame a ferramenta de novo.
@@ -104,12 +106,13 @@ const gmailTools = [
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: 'Busca do Gmail, ex.: "boleto", "from:nubank fatura", "newer_than:30d vencimento"' },
+          query: { type: 'string', description: 'Uma busca do Gmail, ex.: "boleto", "from:nubank fatura", "newer_than:30d vencimento"' },
+          queries: { type: 'array', items: { type: 'string' }, description: 'Várias buscas de uma vez (até 6); os resultados vêm somados, sem repetir. Prefira isto a uma busca só.' },
           max_results: { type: 'integer', description: 'Quantos e-mails (1 a 25). Padrão 15.' },
           page_token: { type: 'string', description: 'next_page_token da busca anterior, para ver mais resultados' },
           reason: reasonParam,
         },
-        required: ['query', 'reason'],
+        required: ['reason'],
       },
     },
   },

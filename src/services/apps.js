@@ -30,18 +30,46 @@ function normalize(message, limit) {
   }
 }
 
-// Busca na caixa de entrada (sintaxe de busca do Gmail). Devolve { needsConnection } se o Gmail não estiver conectado.
-export async function searchGmail(userId, { query, maxResults, pageToken } = {}) {
+const MAX_QUERIES = 6
+const MAX_EMAILS = 40
+
+// Busca na caixa de entrada (sintaxe de busca do Gmail). Aceita várias buscas de uma vez ("queries"): elas rodam juntas e os
+// resultados são somados sem repetir e-mail, para a IA não depender de uma única palavra. Devolve { needsConnection } se o Gmail não estiver conectado.
+export async function searchGmail(userId, { query, queries, maxResults, pageToken } = {}) {
   const connection = await connectionFor(userId, 'gmail')
   if (!connection) return { needsConnection: true }
-  const data = await executeTool(
-    userId,
-    'GMAIL_FETCH_EMAILS',
-    { query: String(query ?? '').slice(0, 300), max_results: clamp(maxResults, 1, 25, 15), ...(pageToken ? { page_token: pageToken } : {}), include_payload: true, verbose: true, user_id: 'me' },
-    connection.id,
+
+  const searches = [...new Set([...(Array.isArray(queries) ? queries : []), query].map((q) => String(q ?? '').trim().slice(0, 300)).filter(Boolean))].slice(0, MAX_QUERIES)
+  if (searches.length === 0) searches.push('')
+  const perSearch = clamp(maxResults, 1, 25, searches.length > 1 ? 10 : 15)
+
+  const settled = await Promise.allSettled(
+    searches.map((q) => executeTool(
+      userId,
+      'GMAIL_FETCH_EMAILS',
+      { query: q, max_results: perSearch, ...(pageToken && searches.length === 1 ? { page_token: pageToken } : {}), include_payload: true, verbose: true, user_id: 'me' },
+      connection.id,
+    )),
   )
-  const emails = (data?.messages ?? []).map((m) => normalize(m, 700))
-  return { emails, nextPageToken: data?.nextPageToken ?? null, total: data?.resultSizeEstimate ?? null }
+  const answered = settled.filter((r) => r.status === 'fulfilled')
+  if (answered.length === 0) throw settled[0].reason
+
+  const seen = new Set()
+  const emails = []
+  for (const { value } of answered) {
+    for (const message of value?.messages ?? []) {
+      const email = normalize(message, searches.length > 1 ? 500 : 700)
+      if (email.id && seen.has(email.id)) continue
+      if (email.id) seen.add(email.id)
+      emails.push(email)
+    }
+  }
+  return {
+    emails: emails.slice(0, MAX_EMAILS),
+    nextPageToken: searches.length === 1 ? answered[0].value?.nextPageToken ?? null : null,
+    total: searches.length === 1 ? answered[0].value?.resultSizeEstimate ?? null : null,
+    searches: searches.length,
+  }
 }
 
 export async function readGmailMessage(userId, messageId) {
