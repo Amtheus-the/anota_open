@@ -16,7 +16,7 @@ export async function ownConversation(userId, id) {
 
 // Um turno de conversa: o site e o WhatsApp usam exatamente este caminho, com a mesma IA e os mesmos dados.
 // Sem conversationId, abre uma conversa nova (com "title" se informado, senão as primeiras palavras da mensagem).
-export async function sendChatMessage(userId, message, { conversationId = null, channel = 'web', title: fixedTitle = null } = {}) {
+export async function sendChatMessage(userId, message, { conversationId = null, channel = 'web', title: fixedTitle = null, mode = 'chat' } = {}) {
   const isNew = !conversationId
   const existing = isNew ? null : await ownConversation(userId, conversationId)
 
@@ -27,7 +27,7 @@ export async function sendChatMessage(userId, message, { conversationId = null, 
 
   // saldos e transações das contas conectadas entram no contexto do assistente
   const fin = await safeFinancials(userId)
-  const { reply, widgets, steps, agents: requested, corrections } = await askWithWidgets(history, summarize(fin), fin, { channel, userId })
+  const { reply, widgets, steps, agents: requested, corrections } = await askWithWidgets(history, summarize(fin), fin, { channel, userId, mode })
   // agentes que a IA criou nesta resposta já ficam salvos no banco
   const agents = []
   for (const request of requested) {

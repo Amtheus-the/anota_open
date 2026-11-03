@@ -48,7 +48,9 @@ router.post('/messages', requireAccess, async (req, res) => {
   if (!message) throw new HttpError(400, 'Mensagem vazia')
   if (message.length > MAX_MESSAGE) throw new HttpError(400, `Mensagem longa demais (máx. ${MAX_MESSAGE})`)
 
-  res.json(await sendChatMessage(req.userId, message, { conversationId: req.body.conversationId }))
+  // mode 'computer': o usuário ligou o botão Computer (só ali o assistente usa apps conectados, como o Gmail)
+  const mode = req.body.mode === 'computer' ? 'computer' : 'chat'
+  res.json(await sendChatMessage(req.userId, message, { conversationId: req.body.conversationId, mode }))
 })
 
 export default router

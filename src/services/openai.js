@@ -54,6 +54,7 @@ Pesquise a caixa de entrada com cuidado e por inteiro: use SEMPRE "queries" com 
 Para boletos, contas e vencimentos, no mínimo: "boleto", "fatura", "vencimento", "cobrança", "pagamento recusado", "segunda via", "nota fiscal" e "newer_than:60d has:attachment".
 Se o resultado vier com poucos e-mails (menos de 3), amplie as buscas (outros termos, remetentes que apareceram, períodos maiores) antes de concluir que não há nada.
 Se houver next_page_token numa busca única e ainda faltar ver e-mails, continue com page_token. Use read_gmail_message para ler um e-mail por inteiro.
+Não pergunte qual e-mail abrir: leia você mesmo, com read_gmail_message, os até 5 mais relevantes (boleto, fatura, cobrança) antes de responder, para trazer valor e vencimento.
 Cruze o que achou nos e-mails com os dados do banco (por exemplo, a fatura do cartão) e diga o que bate e o que não bate. Diga com franqueza o que não deu para ver
 (valor ou vencimento que não estão no e-mail, anexos que você não leu). Nunca invente valor ou data. Preencha "reason" sempre, em uma frase curta que o usuário lê antes de autorizar.
 Se a ferramenta devolver needs_connection, o usuário vê um cartão para autorizar o acesso: explique em 1 ou 2 frases o que vai fazer depois que ele autorizar e não chame a ferramenta de novo.
@@ -191,11 +192,20 @@ normalmente para obter os números, mas escreva na resposta os valores e itens p
 maiores categorias, os totais e as datas), em linhas curtas. Aqui você pode usar o negrito do WhatsApp (*assim*) e listas com "•".
 Seja objetivo: no máximo cerca de 1200 caracteres, sem enrolação.`
 
-export async function askWithWidgets(history, financialContext, fin, { channel = 'web', userId = null } = {}) {
+// Fora do modo Computer a IA não tem as ferramentas de apps: precisa dizer isso, em vez de tentar ou fingir
+const CHAT_MODE_PROMPT = `MODO: conversa normal. Aqui você NÃO tem acesso ao Gmail nem a outros apps conectados, só aos dados financeiros do Open Finance.
+Se o usuário pedir algo que está nos e-mails ou em outro app (boletos por e-mail, recibos, faturas em PDF, agenda), diga em 1 ou 2 frases que isso fica no modo Computer: ele liga o botão
+"Computer" (ao lado do +, na caixa de mensagem, no site) e pede de novo. Se der, responda a parte que os dados do banco permitem (por exemplo, a fatura do cartão e as parcelas), sem inventar o que só estaria no e-mail.
+Não peça para conectar o Gmail nesta conversa e não diga que "não tem como": explique o caminho.`
+
+export async function askWithWidgets(history, financialContext, fin, { channel = 'web', userId = null, mode = 'chat' } = {}) {
   if (!config.openai.apiKey) throw new HttpError(503, 'OpenAI não configurada (OPENAI_API_KEY)')
+  // apps conectados (Gmail) só no modo Computer do site: no chat normal e no WhatsApp o assistente sabe que não os tem
+  const gmailOn = composioConfigured() && userId != null && mode === 'computer' && channel === 'web'
 
   const messages = [{ role: 'system', content: SYSTEM_PROMPT }]
   if (channel === 'whatsapp') messages.push({ role: 'system', content: WHATSAPP_PROMPT })
+  if (composioConfigured() && !gmailOn) messages.push({ role: 'system', content: CHAT_MODE_PROMPT })
   if (financialContext) messages.push({ role: 'system', content: `Dados financeiros do usuário:
 ${financialContext}` })
   messages.push(...history)
@@ -204,7 +214,6 @@ ${financialContext}` })
   const agents = []
   const corrections = []
   let steps = 0
-  const gmailOn = composioConfigured() && userId != null
   // com o Gmail ligado a IA pode fazer várias buscas antes de responder
   const maxRounds = gmailOn ? 7 : 3
   let mailWidget = null
@@ -294,7 +303,7 @@ ${financialContext}` })
         messages.push({
           role: 'tool',
           tool_call_id: call.id,
-          content: JSON.stringify({ ok: true, emails: read, next_page_token: result.nextPageToken ?? null, total_estimado: result.total ?? null, observacao: read.length === 0 ? 'Nenhum e-mail encontrado com essa busca.' : 'Os textos são trechos: se faltar valor ou vencimento, diga que não aparece no e-mail.' }),
+          content: JSON.stringify({ ok: true, emails: read, next_page_token: result.nextPageToken ?? null, total_estimado: result.total ?? null, observacao: read.length === 0 ? 'Nenhum e-mail encontrado com essa busca.' : 'Os textos são trechos. Se um e-mail parece ter valor ou vencimento que o trecho não mostra, chame read_gmail_message AGORA para ele (até 5 e-mails, sem perguntar ao usuário). Só diga que não aparece depois de ler o e-mail inteiro.' }),
         })
         continue
       }
