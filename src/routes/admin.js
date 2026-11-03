@@ -65,6 +65,11 @@ router.get('/overview', async (_req, res) => {
     SELECT p.id, p.plan, p.months, p.amount, p.method, p.status, p.paid_at, u.name, u.email
     FROM payments p LEFT JOIN users u ON u.id = p.user_id ORDER BY p.id DESC LIMIT 10`)
 
+  const [ratings] = await query('SELECT COUNT(*) AS n, COALESCE(AVG(rating), 0) AS average FROM feedback')
+  const recentFeedback = await query(`
+    SELECT f.rating, f.comment, f.updated_at, u.name
+    FROM feedback f JOIN users u ON u.id = f.user_id ORDER BY f.updated_at DESC LIMIT 10`)
+
   const now = new Date()
   const months = Array.from({ length: 6 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1)
@@ -105,6 +110,11 @@ router.get('/overview', async (_req, res) => {
     },
     signupsByDay: fillSeries(signups.map((r) => ({ k: String(r.k).slice(0, 10), v: r.v })), days),
     recentPayments,
+    feedback: {
+      count: count(ratings.n),
+      average: Math.round(Number(ratings.average) * 10) / 10,
+      recent: recentFeedback.map((f) => ({ rating: f.rating, comment: f.comment, updatedAt: f.updated_at, name: f.name })),
+    },
   })
 })
 

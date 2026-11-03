@@ -151,3 +151,15 @@ CREATE TABLE IF NOT EXISTS category_rules (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE KEY uq_user_merchant (user_id, merchant_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Avaliação do Anota Grana feita pelo usuário (uma por pessoa, atualizável)
+CREATE TABLE IF NOT EXISTS feedback (
+  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id    INT UNSIGNED NOT NULL,
+  rating     TINYINT UNSIGNED NOT NULL,
+  comment    VARCHAR(500) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_feedback_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

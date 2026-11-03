@@ -14,6 +14,7 @@ import statusPage from './routes/status.js'
 import whatsappRoutes from './routes/whatsapp.js'
 import adminRoutes from './routes/admin.js'
 import billingRoutes from './routes/billing.js'
+import feedbackRoutes from './routes/feedback.js'
 import { startAgentRunner } from './services/agentRunner.js'
 
 assertConfig()
@@ -72,6 +73,7 @@ app.use('/api/agents', agentsRoutes)
 app.use('/api/whatsapp', whatsappRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/billing', billingRoutes)
+app.use('/api/feedback', feedbackRoutes)
 
 app.use((_req, res) => res.status(404).json({ error: 'Rota não encontrada' }))
 
