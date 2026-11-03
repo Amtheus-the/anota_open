@@ -4,6 +4,7 @@ import { query } from '../db.js'
 import { signToken, verifyToken, requireAuth, isAdminCpf, planActive } from '../middleware/auth.js'
 import { config } from '../config.js'
 import { deleteItem } from '../services/openFinance.js'
+import { removeAllConnections } from '../services/composio.js'
 import { ensureUserName } from '../services/identity.js'
 import { sendCode, checkCode } from '../services/verification.js'
 import {
@@ -155,6 +156,7 @@ router.delete('/me', requireAuth, async (req, res) => {
   }
   const items = await query('SELECT provider_item_id AS id FROM connected_accounts WHERE user_id = ? AND provider_item_id IS NOT NULL', [req.userId])
   await Promise.all(items.map((item) => deleteItem(item.id).catch((err) => console.error('[pluggy] não revogou o item na exclusão da conta:', err.message))))
+  await removeAllConnections(req.userId)
   await query('DELETE FROM verification_codes WHERE phone = ?', [user.phone])
   await query('DELETE FROM users WHERE id = ?', [req.userId])
   console.log(`[conta] usuário ${req.userId} excluiu a conta`)

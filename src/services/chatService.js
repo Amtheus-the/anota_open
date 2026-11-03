@@ -27,7 +27,7 @@ export async function sendChatMessage(userId, message, { conversationId = null, 
 
   // saldos e transações das contas conectadas entram no contexto do assistente
   const fin = await safeFinancials(userId)
-  const { reply, widgets, steps, agents: requested, corrections } = await askWithWidgets(history, summarize(fin), fin, { channel })
+  const { reply, widgets, steps, agents: requested, corrections } = await askWithWidgets(history, summarize(fin), fin, { channel, userId })
   // agentes que a IA criou nesta resposta já ficam salvos no banco
   const agents = []
   for (const request of requested) {

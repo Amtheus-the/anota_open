@@ -22,6 +22,11 @@ export const config = {
     // segredo que o Asaas manda no cabeçalho asaas-access-token em cada webhook; sem ele o webhook fica desligado
     webhookToken: env.ASAAS_WEBHOOK_TOKEN,
   },
+  // Composio: login e ações dos apps conectados (Gmail etc.). Sem COMPOSIO_API_KEY as conexões ficam desligadas.
+  composio: {
+    apiKey: env.COMPOSIO_API_KEY,
+    baseUrl: (env.COMPOSIO_BASE_URL || 'https://backend.composio.dev/api/v3.1').replace(/\/+$/, ''),
+  },
   // CPFs (só dígitos, separados por vírgula) que acessam o painel /admin; sem isso ninguém é admin
   adminCpfs: (env.ADMIN_CPFS ?? '').split(',').map((cpf) => cpf.replace(/\D/g, '')).filter(Boolean),
   db: {

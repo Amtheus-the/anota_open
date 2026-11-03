@@ -17,6 +17,7 @@ import billingRoutes from './routes/billing.js'
 import feedbackRoutes from './routes/feedback.js'
 import apiKeysRoutes from './routes/apiKeys.js'
 import publicApiRoutes from './routes/publicApi.js'
+import appsRoutes from './routes/apps.js'
 import { startAgentRunner } from './services/agentRunner.js'
 
 assertConfig()
@@ -78,6 +79,7 @@ app.use('/api/billing', billingRoutes)
 app.use('/api/feedback', feedbackRoutes)
 app.use('/api/api-keys', apiKeysRoutes)
 app.use('/api/v1', publicApiRoutes)
+app.use('/api/apps', appsRoutes)
 
 app.use((_req, res) => res.status(404).json({ error: 'Rota não encontrada' }))
 

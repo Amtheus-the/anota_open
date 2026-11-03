@@ -2,6 +2,8 @@ import { config } from '../config.js'
 import { HttpError } from '../utils/validators.js'
 import { openAiTools, runTool } from './widgets.js'
 import { CATEGORY_NAMES, previewCorrection } from './categoryRules.js'
+import { composioConfigured } from './composio.js'
+import { readGmailMessage, searchGmail } from './apps.js'
 
 const SYSTEM_PROMPT = `Você é o Anota Grana, um assistente de finanças pessoais em português do Brasil.
 Ajude o usuário a entender gastos, organizar o orçamento e tomar decisões com clareza.
@@ -47,6 +49,12 @@ horário quer receber o aviso; Luno: em que horário quer o fechamento do dia, p
 agente avisa por WhatsApp, no número do cadastro, e que dá para parar a qualquer hora respondendo PARAR. Só DEPOIS que o usuário responder, chame create_agent e confirme em 2 ou 3 frases o que o agente
 vai fazer e quando (padrão 9h, ou 21h no Luno, se ele não disse horário, e avise que pode ajustar). Nunca chame create_agent antes de o usuário
 responder à sua pergunta. Se ele disser que não quer mais o agente, apenas confirme que não criou nada.
+GMAIL: quando o usuário pedir algo que está nos e-mails dele (boletos, faturas, assinaturas, recibos, vencimentos, cobranças recusadas), use search_gmail.
+Pesquise a caixa de entrada com cuidado e por inteiro: faça várias buscas com a sintaxe do Gmail (por exemplo "boleto", "fatura", "vencimento", "cobrança",
+"newer_than:30d", "has:attachment") e, se houver next_page_token e ainda faltar ver e-mails, continue com page_token. Use read_gmail_message para ler um e-mail por inteiro.
+Cruze o que achou nos e-mails com os dados do banco (por exemplo, a fatura do cartão) e diga o que bate e o que não bate. Diga com franqueza o que não deu para ver
+(valor ou vencimento que não estão no e-mail, anexos que você não leu). Nunca invente valor ou data. Preencha "reason" sempre, em uma frase curta que o usuário lê antes de autorizar.
+Se a ferramenta devolver needs_connection, o usuário vê um cartão para autorizar o acesso: explique em 1 ou 2 frases o que vai fazer depois que ele autorizar e não chame a ferramenta de novo.
 Descreva exatamente o que o bloco mostra: não omita itens nem troque valores. Se a ferramenta voltar sem resultado, aí sim diga que não encontrou.`
 
 // Agentes que o chat pode criar (o front guarda a lista; aqui só validamos qual foi escolhido)
@@ -84,6 +92,36 @@ const setCategoryTool = {
     },
   },
 }
+
+// Gmail (via Composio): o chat procura e lê e-mails do usuário depois que ele autoriza o acesso
+const reasonParam = { type: 'string', description: 'Uma frase curta, em português, dizendo ao usuário para que você precisa do Gmail (ex.: "para procurar no seu Gmail os boletos que vencem esta semana")' }
+const gmailTools = [
+  {
+    type: 'function',
+    function: {
+      name: 'search_gmail',
+      description: 'Procura e-mails na caixa de entrada do usuário (sintaxe de busca do Gmail). Devolve remetente, assunto, data e um trecho do texto.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Busca do Gmail, ex.: "boleto", "from:nubank fatura", "newer_than:30d vencimento"' },
+          max_results: { type: 'integer', description: 'Quantos e-mails (1 a 25). Padrão 15.' },
+          page_token: { type: 'string', description: 'next_page_token da busca anterior, para ver mais resultados' },
+          reason: reasonParam,
+        },
+        required: ['query', 'reason'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_gmail_message',
+      description: 'Lê um e-mail por inteiro a partir do id devolvido por search_gmail.',
+      parameters: { type: 'object', properties: { message_id: { type: 'string' }, reason: reasonParam }, required: ['message_id', 'reason'] },
+    },
+  },
+]
 
 // Título curto para a lista "Recentes" (ex.: "Gastos com transporte por app").
 // Roda em segundo plano; se falhar, o título provisório continua valendo.
@@ -150,7 +188,7 @@ normalmente para obter os números, mas escreva na resposta os valores e itens p
 maiores categorias, os totais e as datas), em linhas curtas. Aqui você pode usar o negrito do WhatsApp (*assim*) e listas com "•".
 Seja objetivo: no máximo cerca de 1200 caracteres, sem enrolação.`
 
-export async function askWithWidgets(history, financialContext, fin, { channel = 'web' } = {}) {
+export async function askWithWidgets(history, financialContext, fin, { channel = 'web', userId = null } = {}) {
   if (!config.openai.apiKey) throw new HttpError(503, 'OpenAI não configurada (OPENAI_API_KEY)')
 
   const messages = [{ role: 'system', content: SYSTEM_PROMPT }]
@@ -163,8 +201,12 @@ ${financialContext}` })
   const agents = []
   const corrections = []
   let steps = 0
+  const gmailOn = composioConfigured() && userId != null
+  // com o Gmail ligado a IA pode fazer várias buscas antes de responder
+  const maxRounds = gmailOn ? 7 : 3
+  let mailWidget = null
 
-  for (let round = 0; round < 3; round++) {
+  for (let round = 0; round < maxRounds; round++) {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.openai.apiKey}` },
@@ -173,7 +215,7 @@ ${financialContext}` })
         messages,
         temperature: 0.4,
         // na última volta a IA já tem os blocos e só precisa escrever
-        ...(round < 2 ? { tools: [...(fin.accounts.length > 0 ? [...openAiTools, setCategoryTool] : []), createAgentTool] } : {}),
+        ...(round < maxRounds - 1 ? { tools: [...(fin.accounts.length > 0 ? [...openAiTools, setCategoryTool] : []), createAgentTool, ...(gmailOn ? gmailTools : [])] } : {}),
       }),
       signal: AbortSignal.timeout(45_000),
     })
@@ -215,6 +257,41 @@ ${financialContext}` })
           content: JSON.stringify(result.ok
             ? { ok: true, categoria: result.category, estabelecimentos: result.merchants.map((m) => ({ nome: m.label, transacoes: m.count, total: m.total })), observacao: 'A regra vale para todas as transações desse estabelecimento, passadas e futuras.' }
             : { ok: false, error: result.error, exemplos: result.exemplos }),
+        })
+        continue
+      }
+      if (call.function.name === 'search_gmail' || call.function.name === 'read_gmail_message') {
+        let result
+        try {
+          result = call.function.name === 'search_gmail'
+            ? await searchGmail(userId, { query: args.query, maxResults: args.max_results, pageToken: args.page_token })
+            : await readGmailMessage(userId, args.message_id)
+        } catch (err) {
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: false, error: 'Não consegui acessar o Gmail agora' }) })
+          console.error('[gmail]', err.message)
+          continue
+        }
+        if (result.needsConnection) {
+          if (channel === 'whatsapp') {
+            messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ needs_connection: true, observacao: 'O Gmail ainda não está conectado. A conexão só é feita no app: peça para abrir Minha conta, depois Apps, e conectar o Gmail.' }) })
+          } else {
+            if (!widgets.some((w) => w.type === 'connectApp')) widgets.push({ type: 'connectApp', title: 'Conectar o Gmail', app: 'gmail', name: 'Gmail', reason: String(args.reason ?? 'para procurar nos seus e-mails').slice(0, 200) })
+            messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ needs_connection: true, observacao: 'O usuário vê agora um cartão para autorizar o Gmail. Depois que ele autorizar, ele pede de novo.' }) })
+          }
+          continue
+        }
+        // um único bloco mostra tudo o que foi lido, para o usuário saber de onde vieram as respostas
+        const read = result.emails ?? [result.email]
+        if (!mailWidget) {
+          mailWidget = { type: 'mailRead', title: 'E-mails lidos no Gmail', count: 0, items: [] }
+          widgets.push(mailWidget)
+        }
+        mailWidget.count += read.length
+        for (const e of read) if (mailWidget.items.length < 30) mailWidget.items.push({ from: String(e.from).slice(0, 80), subject: String(e.subject).slice(0, 120), date: String(e.date).slice(0, 40) })
+        messages.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: JSON.stringify({ ok: true, emails: read, next_page_token: result.nextPageToken ?? null, total_estimado: result.total ?? null, observacao: read.length === 0 ? 'Nenhum e-mail encontrado com essa busca.' : 'Os textos são trechos: se faltar valor ou vencimento, diga que não aparece no e-mail.' }),
         })
         continue
       }
