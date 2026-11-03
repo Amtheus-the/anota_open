@@ -102,6 +102,18 @@ router.patch('/me/preferences', requireAuth, async (req, res) => {
   res.json({ whatsappAlerts: req.body.whatsappAlerts })
 })
 
+// Troca de senha: exige a senha atual. Os logins já abertos continuam valendo até expirarem (7 dias).
+router.patch('/me/password', requireAuth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body ?? {}
+  if (typeof newPassword !== 'string' || newPassword.length < 8) throw new HttpError(400, 'A nova senha precisa ter ao menos 8 caracteres')
+  const [user] = await query('SELECT id, password_hash FROM users WHERE id = ?', [req.userId])
+  if (!user) throw new HttpError(401, 'Conta não encontrada')
+  if (typeof currentPassword !== 'string' || !(await bcrypt.compare(currentPassword, user.password_hash))) throw new HttpError(403, 'Senha atual incorreta')
+  if (currentPassword === newPassword) throw new HttpError(400, 'A nova senha precisa ser diferente da atual')
+  await query('UPDATE users SET password_hash = ? WHERE id = ?', [await bcrypt.hash(newPassword, 12), req.userId])
+  res.status(204).end()
+})
+
 // LGPD, art. 18: cópia dos dados que o Anota Grana guarda sobre a pessoa (extratos e transações ficam no banco e na
 // Pluggy, não aqui: são lidos na hora e só ficam em memória por pouco tempo)
 router.get('/me/export', requireAuth, async (req, res) => {
