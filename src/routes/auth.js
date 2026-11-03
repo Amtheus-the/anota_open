@@ -14,6 +14,7 @@ const router = Router()
 
 const publicUser = (u) => ({ id: u.id, name: u.name, cpf: u.cpf, phone: u.phone, email: u.email, isAdmin: isAdminCpf(u.cpf),
   plan: u.plan, planExpiresAt: u.plan_expires_at ?? null, planActive: isAdminCpf(u.cpf) || planActive(u), whatsappAlerts: !u.whatsapp_optout_at,
+  birthDate: u.birth_date ? String(u.birth_date).slice(0, 10) : null,
 })
 
 const isAdult = (birth) => {
@@ -100,6 +101,15 @@ router.patch('/me/preferences', requireAuth, async (req, res) => {
   if (typeof req.body?.whatsappAlerts !== 'boolean') throw new HttpError(400, 'Valor inválido')
   await query(`UPDATE users SET whatsapp_optout_at = ${req.body.whatsappAlerts ? 'NULL' : 'NOW()'} WHERE id = ?`, [req.userId])
   res.json({ whatsappAlerts: req.body.whatsappAlerts })
+})
+
+// Edita o nome. Data de nascimento, CPF, e-mail e celular não mudam por aqui: valem para a idade mínima, o login e o código de
+// verificação (a troca passa pelo suporte).
+router.patch('/me/profile', requireAuth, async (req, res) => {
+  const name = String(req.body?.name ?? '').replace(/\s+/g, ' ').trim()
+  if (name.length < 2 || name.length > 120) throw new HttpError(400, 'Informe o seu nome (2 a 120 caracteres)')
+  await query('UPDATE users SET name = ? WHERE id = ?', [name, req.userId])
+  res.json({ name })
 })
 
 // Troca de senha: exige a senha atual. Os logins já abertos continuam valendo até expirarem (7 dias).
