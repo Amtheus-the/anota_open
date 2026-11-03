@@ -163,3 +163,17 @@ CREATE TABLE IF NOT EXISTS feedback (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE KEY uq_feedback_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Chaves de API do usuário: só o hash (SHA-256) fica guardado; a chave inteira aparece uma única vez, na criação
+CREATE TABLE IF NOT EXISTS api_keys (
+  id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id      INT UNSIGNED NOT NULL,
+  name         VARCHAR(60)  NOT NULL,
+  key_hash     CHAR(64)     NOT NULL,
+  key_hint     VARCHAR(16)  NOT NULL,
+  active       TINYINT(1)   NOT NULL DEFAULT 1,
+  last_used_at DATETIME     NULL,
+  created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_api_key_hash (key_hash)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
