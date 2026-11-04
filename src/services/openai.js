@@ -62,6 +62,8 @@ AGENDA (Google Calendar): para ver compromissos use list_calendar_events (consul
 crie DIRETO, é só na agenda dele e dá para desfazer; NUNCA coloque convidados nem mande e-mail de convite. Use datas e horas de Brasília, calcule "amanhã" e dias da semana a partir do "Agora" informado, e confirme em 1 frase com dia, hora e o que foi gravado.
 Quando o lembrete for de uma conta, busque o valor e o vencimento reais nos dados do banco ou nos e-mails antes de criar, e ponha-os no título e na descrição. Para apagar, use delete_calendar_event com o id do evento.
 Se a ferramenta devolver needs_connection, o usuário vê o cartão para autorizar: explique em 1 frase e não repita a chamada.
+REGRA DA AGENDA: só diga que criou, agendou, marcou ou apagou algo DEPOIS de chamar create_calendar_event ou delete_calendar_event e receber ok. Nunca confirme por conta própria.
+Se o usuário pediu para criar ou apagar e você ainda não chamou a ferramenta, chame agora. Se não achar o evento para apagar, diga que não encontrou.
 Descreva exatamente o que o bloco mostra: não omita itens nem troque valores. Se a ferramenta voltar sem resultado, aí sim diga que não encontrou.`
 
 // Agentes que o chat pode criar (o front guarda a lista; aqui só validamos qual foi escolhido)
@@ -243,6 +245,16 @@ normalmente para obter os números, mas escreva na resposta os valores e itens p
 maiores categorias, os totais e as datas), em linhas curtas. Aqui você pode usar o negrito do WhatsApp (*assim*) e listas com "•".
 Seja objetivo: no máximo cerca de 1200 caracteres, sem enrolação.`
 
+// No WhatsApp só a agenda está liberada (e-mail fica no modo Computer do site): lembretes e compromissos por mensagem
+const WHATSAPP_APPS_PROMPT = `AGENDA NO WHATSAPP: aqui você tem a agenda do usuário (list_calendar_events, create_calendar_event, delete_calendar_event), mas NÃO tem o Gmail.
+Se ele pedir algo dos e-mails, diga em 1 frase que isso fica no modo Computer do site. O usuário não vê blocos visuais: ao criar ou listar, escreva na resposta o título, o dia da semana, a data e a hora,
+em linhas curtas. Não tem botão Desfazer: para apagar, liste os compromissos do dia com list_calendar_events, ache o certo pelo título e use o id dele em delete_calendar_event; se houver dúvida entre dois, pergunte.
+Se a agenda não estiver conectada, diga que a conexão é feita no site, em Minha conta, Apps, e peça para ele voltar depois.`
+
+// Trava contra confirmação inventada: a IA às vezes escreve "lembrete criado" sem ter chamado a ferramenta
+const CLAIMS_CALENDAR_WRITE = /(criei|agendei|marquei|apaguei|removi|cancelei|exclu[ií]|lembrete (agendado|criado)|evento (criado|agendado)|foi (removido|apagado|criado|agendado|marcado|exclu[ií]do)|já (foi|está) (removido|apagado|agendado|marcado))/i
+const MENTIONS_CALENDAR = /(lembrete|evento|agenda|reunião|reuniao|compromisso)/i
+
 // Fora do modo Computer a IA não tem as ferramentas de apps: precisa dizer isso, em vez de tentar ou fingir
 const CHAT_MODE_PROMPT = `MODO: conversa normal. Aqui você NÃO tem acesso ao Gmail nem a outros apps conectados, só aos dados financeiros do Open Finance.
 Se o usuário pedir algo que está nos e-mails ou em outro app (boletos por e-mail, recibos, faturas em PDF, agenda), diga em 1 ou 2 frases que isso fica no modo Computer: ele liga o botão
@@ -252,12 +264,15 @@ Não peça para conectar o Gmail nesta conversa e não diga que "não tem como":
 export async function askWithWidgets(history, financialContext, fin, { channel = 'web', userId = null, mode = 'chat' } = {}) {
   if (!config.openai.apiKey) throw new HttpError(503, 'OpenAI não configurada (OPENAI_API_KEY)')
   // apps conectados (Gmail) só no modo Computer do site: no chat normal e no WhatsApp o assistente sabe que não os tem
-  const gmailOn = composioConfigured() && userId != null && mode === 'computer' && channel === 'web' // vale para todos os apps conectados
+  const appsAvailable = composioConfigured() && userId != null
+  const gmailOn = appsAvailable && mode === 'computer' && channel === 'web' // e-mail: só no modo Computer do site
+  const calendarOn = gmailOn || (appsAvailable && channel === 'whatsapp') // agenda: modo Computer do site e WhatsApp
 
   const messages = [{ role: 'system', content: SYSTEM_PROMPT }]
   if (channel === 'whatsapp') messages.push({ role: 'system', content: WHATSAPP_PROMPT })
-  if (composioConfigured() && !gmailOn) messages.push({ role: 'system', content: CHAT_MODE_PROMPT })
-  if (gmailOn) {
+  if (composioConfigured() && !calendarOn) messages.push({ role: 'system', content: CHAT_MODE_PROMPT })
+  if (appsAvailable && channel === 'whatsapp') messages.push({ role: 'system', content: WHATSAPP_APPS_PROMPT })
+  if (calendarOn) {
     const now = new Date()
     const agora = now.toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 16)
     messages.push({ role: 'system', content: `Agora: ${agora} (horário de Brasília), ${now.toLocaleDateString('pt-BR', { weekday: 'long', timeZone: 'America/Sao_Paulo' })}.` })
@@ -271,8 +286,10 @@ ${financialContext}` })
   const corrections = []
   let steps = 0
   // com o Gmail ligado a IA pode fazer várias buscas antes de responder
-  const maxRounds = gmailOn ? 7 : 3
+  const maxRounds = calendarOn ? 7 : 3
   let mailWidget = null
+  let calendarWrote = false // criou ou apagou de verdade nesta resposta
+  let nudged = false
 
   for (let round = 0; round < maxRounds; round++) {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -283,7 +300,7 @@ ${financialContext}` })
         messages,
         temperature: 0.4,
         // na última volta a IA já tem os blocos e só precisa escrever
-        ...(round < maxRounds - 1 ? { tools: [...(fin.accounts.length > 0 ? [...openAiTools, setCategoryTool] : []), createAgentTool, ...(gmailOn ? [...gmailTools, ...calendarTools] : [])] } : {}),
+        ...(round < maxRounds - 1 ? { tools: [...(fin.accounts.length > 0 ? [...openAiTools, setCategoryTool] : []), createAgentTool, ...(gmailOn ? gmailTools : []), ...(calendarOn ? calendarTools : [])] } : {}),
       }),
       signal: AbortSignal.timeout(45_000),
     })
@@ -298,6 +315,13 @@ ${financialContext}` })
     if (calls.length === 0) {
       const reply = message?.content?.trim()
       if (!reply) throw new HttpError(502, 'Resposta vazia do assistente')
+      if (calendarOn && !calendarWrote && !nudged && agents.length === 0 && CLAIMS_CALENDAR_WRITE.test(reply) && MENTIONS_CALENDAR.test(reply)) {
+        // disse que mexeu na agenda sem chamar a ferramenta: manda corrigir antes de o usuário acreditar
+        nudged = true
+        messages.push(message)
+        messages.push({ role: 'system', content: 'ATENÇÃO: você escreveu que criou, agendou ou apagou algo na agenda, mas NÃO chamou a ferramenta. Chame create_calendar_event ou delete_calendar_event agora (para apagar, liste os eventos antes e use o id certo). Se não for possível, diga com clareza que NÃO foi feito.' })
+        continue
+      }
       return { reply, widgets, steps, agents, corrections }
     }
 
@@ -375,8 +399,12 @@ ${financialContext}` })
           continue
         }
         if (result.needsConnection) {
-          if (!widgets.some((w) => w.type === 'connectApp' && w.app === 'googlecalendar')) widgets.push({ type: 'connectApp', title: 'Conectar o Google Calendar', app: 'googlecalendar', name: 'Google Calendar', reason: String(args.reason ?? 'para acessar a sua agenda').slice(0, 200) })
-          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ needs_connection: true, observacao: 'O usuário vê agora um cartão para autorizar o Google Calendar. Depois que ele autorizar, ele pede de novo.' }) })
+          if (channel === 'whatsapp') {
+            messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ needs_connection: true, observacao: 'A agenda ainda não está conectada. A conexão só é feita no site: peça para abrir Minha conta, depois Apps, e conectar o Google Calendar.' }) })
+          } else {
+            if (!widgets.some((w) => w.type === 'connectApp' && w.app === 'googlecalendar')) widgets.push({ type: 'connectApp', title: 'Conectar o Google Calendar', app: 'googlecalendar', name: 'Google Calendar', reason: String(args.reason ?? 'para acessar a sua agenda').slice(0, 200) })
+            messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ needs_connection: true, observacao: 'O usuário vê agora um cartão para autorizar o Google Calendar. Depois que ele autorizar, ele pede de novo.' }) })
+          }
           continue
         }
         if (result.error) {
@@ -387,9 +415,11 @@ ${financialContext}` })
           widgets.push({ type: 'calendarEvents', title: 'Compromissos na agenda', from: args.from, to: args.to, calendars: result.calendars, items: result.events.slice(0, 30), count: result.events.length })
           messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, agendas_consultadas: result.calendars, agendas_com_falha: result.failed, eventos: result.events, observacao: result.events.length === 0 ? 'Nenhum compromisso nesse período.' : undefined }) })
         } else if (result.event) {
+          calendarWrote = true
           widgets.push({ type: 'calendarEvent', title: 'Evento criado na agenda', event: result.event })
           messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, criado: result.event }) })
         } else {
+          calendarWrote = true
           messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, apagado: true }) })
         }
         continue
