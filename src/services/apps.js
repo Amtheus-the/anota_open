@@ -307,9 +307,14 @@ export async function appendNotionPage(userId, { pageId, text, title } = {}) {
 
 // ---------- Trello ----------
 // A Composio devolve listas ora direto, ora dentro de response_data/data: lê o que vier
-const asList = (d) => {
-  const v = Array.isArray(d) ? d : d?.response_data ?? d?.data ?? d?.items ?? d?.boards ?? d?.lists ?? d?.cards
-  return Array.isArray(v) ? v : []
+const asList = (d, depth = 0) => {
+  if (Array.isArray(d)) return d
+  if (!d || typeof d !== 'object' || depth > 3) return []
+  for (const v of Object.values(d)) {
+    const found = asList(v, depth + 1)
+    if (found.length) return found
+  }
+  return []
 }
 const sameText = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase()
 
@@ -328,7 +333,9 @@ function pickByName(list, value) {
 
 async function trelloBoards(userId, connection) {
   const data = await executeTool(userId, 'TRELLO_GET_MEMBERS_BOARDS_BY_ID_MEMBER', { idMember: 'me', filter: 'open', fields: 'name,url,shortUrl,shortLink,closed' }, connection.id)
-  return asList(data).filter((b) => b.id && !b.closed).map((b) => ({ id: b.id, name: b.name ?? '(sem nome)', url: b.shortUrl ?? b.url ?? null, shortLink: b.shortLink }))
+  const boards = asList(data).filter((b) => b.id && !b.closed).map((b) => ({ id: b.id, name: b.name ?? '(sem nome)', url: b.shortUrl ?? b.url ?? null, shortLink: b.shortLink }))
+  if (boards.length === 0) console.log('[trello] nenhum quadro; resposta do Trello:', JSON.stringify(data)?.slice(0, 400))
+  return boards
 }
 
 async function trelloLists(userId, connection, boardId, withCards) {
