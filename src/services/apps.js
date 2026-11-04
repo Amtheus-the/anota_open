@@ -156,17 +156,19 @@ export async function createCalendarEvent(userId, { title, start, durationMinute
     connection.id,
   )
   const event = created?.response_data ?? created?.event ?? created
+  console.log('[agenda] evento criado; convidados:', JSON.stringify(event?.attendees ?? null)?.slice(0, 200), '; lembretes:', JSON.stringify(event?.reminders ?? null)?.slice(0, 200))
   const id = event?.id ?? event?.event_id ?? created?.id
   if (!id) return { error: 'A agenda não confirmou a criação do evento' }
 
   // aviso na tela nos minutos pedidos (o padrão da agenda pode ser só um). Se falhar, o evento já existe e segue valendo.
   const wanted = (Array.isArray(reminders) && reminders.length ? reminders : [60, 0]).map((m) => clamp(m, 0, 40320, 0)).slice(0, 5)
-  await executeTool(
+  const patched = await executeTool(
     userId,
     'GOOGLECALENDAR_PATCH_EVENT',
     { event_id: id, calendar_id: 'primary', reminders: { useDefault: false, overrides: wanted.map((m) => ({ method: 'popup', minutes: m })) } },
     connection.id,
   ).catch((err) => console.error('[agenda] não ajustou os avisos:', err.message))
+  console.log('[agenda] avisos pedidos', JSON.stringify(wanted), '; devolvido:', JSON.stringify(patched?.response_data?.reminders ?? patched?.reminders ?? patched)?.slice(0, 300))
 
   const end = new Date(new Date(`${when[1]}T${when[2]}:00${OFFSET}`).getTime() + minutes * 60_000)
   return {

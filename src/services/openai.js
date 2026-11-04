@@ -315,6 +315,7 @@ Seja objetivo: no máximo cerca de 1200 caracteres, sem enrolação.`
 const WHATSAPP_APPS_PROMPT = `AGENDA NO WHATSAPP: aqui você tem a agenda do usuário (list_calendar_events, create_calendar_event, delete_calendar_event), mas NÃO tem o Gmail.
 Se ele pedir algo dos e-mails, diga em 1 frase que isso fica no modo Computer do site. O usuário não vê blocos visuais: ao criar ou listar, escreva na resposta o título, o dia da semana, a data e a hora,
 em linhas curtas. Não tem botão Desfazer: para apagar, liste os compromissos do dia com list_calendar_events, ache o certo pelo título e use o id dele em delete_calendar_event; se houver dúvida entre dois, pergunte.
+Para reunião online (videochamada), use create_calendar_event com meet=true e ESCREVA o link do Meet na resposta (ele não vê cartões).
 Se a agenda não estiver conectada, diga que a conexão é feita no site, em Minha conta, Apps, e peça para ele voltar depois.`
 
 // Trava contra confirmação inventada: a IA às vezes escreve "lembrete criado" sem ter chamado a ferramenta
