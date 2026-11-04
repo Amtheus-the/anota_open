@@ -361,6 +361,7 @@ ${financialContext}` })
   let mailWidget = null
   let calendarWrote = false // criou ou apagou de verdade nesta resposta
   let nudges = 0
+  let listedCalendar = false // consultou a agenda de verdade nesta resposta
   let writeError = null // última falha de uma ação de escrita (criar/apagar) nesta resposta
   let forced = null // ferramenta que a próxima volta é obrigada a chamar
 
@@ -401,6 +402,15 @@ ${financialContext}` })
         }
         messages.push(message)
         messages.push({ role: 'system', content: 'ATENÇÃO: você escreveu que criou, agendou, apagou ou VAI fazer algo (agenda ou Notion), mas NÃO chamou a ferramenta. Chame agora a ferramenta certa (create_calendar_event, delete_calendar_event, create_notion_page ou append_notion_page; para apagar, liste antes e use o id certo). Se não for possível, diga com clareza que NÃO foi feito. Não responda de novo com promessa.' })
+        continue
+      }
+      // disse que a agenda está livre sem ter olhado: manda consultar antes de o usuário acreditar
+      const asked = String(history[history.length - 1]?.content ?? '')
+      if (calendarOn && !listedCalendar && !calendarWrote && nudges < 2 && /(agenda|reuni|compromisso|evento|marcado)/i.test(asked) && /(nenhum|nenhuma|livre|não tem|não há|sem compromisso)/i.test(reply)) {
+        nudges += 1
+        forced = 'list_calendar_events'
+        messages.push(message)
+        messages.push({ role: 'system', content: 'ATENÇÃO: você disse que não há compromissos sem consultar a agenda. Chame list_calendar_events agora com o período pedido e responda só com o que ela devolver.' })
         continue
       }
       // a ação falhou e, mesmo assim, o texto diz que foi feita: troca por um aviso honesto
@@ -475,6 +485,7 @@ ${financialContext}` })
       if (call.function.name === 'list_calendar_events' || call.function.name === 'create_calendar_event' || call.function.name === 'delete_calendar_event') {
         let result
         try {
+          if (call.function.name === 'list_calendar_events') listedCalendar = true
           if (call.function.name === 'list_calendar_events') result = await calendarEvents(userId, { from: args.from, to: args.to })
           else if (call.function.name === 'create_calendar_event') result = await createCalendarEvent(userId, { title: args.title, start: args.start, durationMinutes: args.duration_minutes, description: args.description, reminders: args.reminders, meet: args.meet })
           else result = await deleteCalendarEvent(userId, args.event_id, args.calendar_id)

@@ -122,6 +122,7 @@ export async function calendarEvents(userId, { from, to } = {}) {
     if (result.status === 'fulfilled') for (const e of items(result.value)) if (e.id && e.status !== 'cancelled') events.push(normalizeEvent(e, calendars[i]))
   })
   events.sort((a, b) => (a.start < b.start ? -1 : 1))
+  console.log('[agenda] listou', from, 'a', to, '| agendas:', calendars.length, '| eventos:', events.length, '| falhas:', settled.filter((r) => r.status === 'rejected').length)
   return { events: events.slice(0, 60), calendars: calendars.map((c) => c.summary ?? c.id), failed: settled.filter((r) => r.status === 'rejected').length }
 }
 
