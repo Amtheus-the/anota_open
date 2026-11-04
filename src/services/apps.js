@@ -218,7 +218,7 @@ export async function searchNotion(userId, { query, kind } = {}) {
   }
   return {
     more,
-    pages: found.slice(0, 25).map((o) => ({ id: o.id, type: o.object ?? 'page', title: notionTitle(o) || '(sem título)', url: notionUrl(o.id, o.url), edited: o.last_edited_time ?? '' })),
+    pages: found.slice(0, 25).map((o) => ({ id: o.id, type: o.object ?? 'page', title: notionTitle(o) || '(sem título)', url: notionUrl(o.id, o.url), edited: o.last_edited_time ?? '', parentType: o.parent?.type ?? '' })),
   }
 }
 
@@ -253,12 +253,25 @@ export async function createNotionPage(userId, { parentId, title, markdown } = {
   if (!parentId) return { error: 'Informe parent_id: a página onde a nova ficará. Use search_notion para listar as páginas disponíveis ou pergunte ao usuário.' }
   const parent = await resolveNotionId(userId, parentId)
   if (parent.error) return { error: parent.error }
-  const created = await executeTool(
-    userId,
-    'NOTION_CREATE_NOTION_PAGE',
-    { parent_id: parent.id, title: clean(title, 200) || 'Nova página', ...(markdown ? { markdown: String(markdown).slice(0, 20000) } : {}) },
-    connection.id,
-  )
+  let created
+  try {
+    created = await executeTool(
+      userId,
+      'NOTION_CREATE_NOTION_PAGE',
+      { parent_id: parent.id, title: clean(title, 200) || 'Nova página', ...(markdown ? { markdown: String(markdown).slice(0, 20000) } : {}) },
+      connection.id,
+    )
+  } catch (err) {
+    // o Notion recusa subpáginas dentro de itens de um banco de dados: explica e sugere páginas comuns
+    const known = (await searchNotion(userId, { query: '' }).catch(() => ({ pages: [] }))).pages
+    const same = (a, b) => String(a).replace(/-/g, '') === String(b).replace(/-/g, '')
+    const asked = known.find((p) => same(p.id, parent.id))
+    if (asked?.parentType === 'database_id') {
+      const alternatives = known.filter((p) => p.parentType !== 'database_id').slice(0, 5).map((p) => p.title)
+      return { error: `"${asked.title}" é um item de um banco de dados do Notion, e o Notion não deixa criar páginas dentro dele por aqui.${alternatives.length ? ` Páginas comuns onde dá para criar: ${alternatives.join(', ')}.` : ''} Pergunte ao usuário em qual usar.` }
+    }
+    throw err
+  }
   const id = pick(created, 'id')
   if (!id) return { error: 'O Notion não confirmou a criação da página' }
   return { page: { id, title: clean(title, 200) || 'Nova página', url: notionUrl(id, pick(created, 'url')), action: 'created' } }

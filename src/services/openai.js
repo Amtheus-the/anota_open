@@ -66,6 +66,7 @@ REGRA DA AGENDA: só diga que criou, agendou, marcou ou apagou algo DEPOIS de ch
 Se o usuário pediu para criar ou apagar e você ainda não chamou a ferramenta, chame agora. Se não achar o evento para apagar, diga que não encontrou.
 NOTION: use search_notion para achar páginas (ele só vê o que o usuário liberou: se vier vazio, diga para conferir as permissões da conexão), read_notion_page para ler e resumir, create_notion_page para criar uma página NOVA e append_notion_page para acrescentar no fim de uma existente.
 Para criar, o Notion exige a página onde ela ficará: se o usuário não disse onde, chame search_notion e PERGUNTE qual das páginas usar (ou, se só houver uma opção clara, diga qual vai usar). Escreva o markdown completo (títulos, listas, tarefas, valores reais dos dados dele).
+Só crie páginas DENTRO de páginas com pode_ser_pai=true: itens de um banco de dados (pode_ser_pai=false) não aceitam subpáginas. Se o usuário pedir uma que não aceita, explique em 1 frase e ofereça páginas que aceitam; se a ferramenta devolver erro, diga com clareza que NADA foi criado.
 Se o pedido já traz o título e o lugar (ex.: "crie 'Meta de teste' dentro de Anderson Matheus, com um plano mês a mês"), CRIE DIRETO em vez de perguntar: faça suposições razoáveis (valores e prazos a partir dos dados financeiros dele que já estão acima), escreva o plano completo e, depois de criar, diga em 1 frase o que supôs e que ele pode pedir ajuste. Só pergunte se faltar o LOCAL da página.
 Para montar o conteúdo de uma página, use os números dos dados financeiros que você já recebeu: NÃO chame as ferramentas show_* (blocos visuais) a menos que o usuário peça para ver os dados.
 Nunca escreva "vou criar" ou "aguarde um instante" e termine a resposta: se for criar, chame a ferramenta AGORA, na mesma resposta, e só depois escreva o resultado.
@@ -357,6 +358,7 @@ ${financialContext}` })
   let mailWidget = null
   let calendarWrote = false // criou ou apagou de verdade nesta resposta
   let nudges = 0
+  let writeError = null // última falha de uma ação de escrita (criar/apagar) nesta resposta
   let forced = null // ferramenta que a próxima volta é obrigada a chamar
 
   for (let round = 0; round < maxRounds; round++) {
@@ -397,6 +399,10 @@ ${financialContext}` })
         messages.push(message)
         messages.push({ role: 'system', content: 'ATENÇÃO: você escreveu que criou, agendou, apagou ou VAI fazer algo (agenda ou Notion), mas NÃO chamou a ferramenta. Chame agora a ferramenta certa (create_calendar_event, delete_calendar_event, create_notion_page ou append_notion_page; para apagar, liste antes e use o id certo). Se não for possível, diga com clareza que NÃO foi feito. Não responda de novo com promessa.' })
         continue
+      }
+      // a ação falhou e, mesmo assim, o texto diz que foi feita: troca por um aviso honesto
+      if (writeError && !calendarWrote && CLAIMS_CALENDAR_WRITE.test(reply) && MENTIONS_CALENDAR.test(reply)) {
+        return { reply: `Não consegui concluir isso: ${writeError}. Nada foi criado nem alterado.`, widgets, steps, agents, corrections }
       }
       return { reply, widgets, steps, agents, corrections }
     }
@@ -471,7 +477,8 @@ ${financialContext}` })
           else result = await deleteCalendarEvent(userId, args.event_id, args.calendar_id)
         } catch (err) {
           console.error('[agenda]', err.message)
-          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: false, error: 'Não consegui acessar a agenda agora' }) })
+          if (call.function.name !== 'list_calendar_events') writeError = 'a agenda recusou o pedido'
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: false, error: 'A agenda recusou o pedido. NADA foi feito: diga isso ao usuário.' }) })
           continue
         }
         if (result.needsConnection) {
@@ -509,7 +516,8 @@ ${financialContext}` })
           else result = await appendNotionPage(userId, { pageId: args.page_id, text: args.text, title: args.title })
         } catch (err) {
           console.error('[notion]', err.message)
-          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: false, error: 'Não consegui acessar o Notion agora' }) })
+          if (call.function.name === 'create_notion_page' || call.function.name === 'append_notion_page') writeError = 'o Notion recusou o pedido'
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: false, error: 'O Notion recusou o pedido. NADA foi criado: diga isso ao usuário.' }) })
           continue
         }
         if (result.needsConnection) {
@@ -518,12 +526,13 @@ ${financialContext}` })
           continue
         }
         if (result.error) {
+          if (call.function.name === 'create_notion_page' || call.function.name === 'append_notion_page') writeError = result.error
           messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: false, error: result.error }) })
           continue
         }
         if (result.pages) {
           widgets.push({ type: 'notionPages', title: 'Páginas no Notion', count: result.pages.length, more: Boolean(result.more), items: result.pages })
-          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, paginas: result.pages, mais_paginas_alem_destas: Boolean(result.more), observacao: result.pages.length === 0 ? 'Nada encontrado. O Notion só mostra o que o usuário liberou ao conectar: peça para conferir as permissões da conexão.' : undefined }) })
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, paginas: result.pages.map((p) => ({ ...p, pode_ser_pai: p.parentType !== 'database_id' })), mais_paginas_alem_destas: Boolean(result.more), observacao: result.pages.length === 0 ? 'Nada encontrado. O Notion só mostra o que o usuário liberou ao conectar: peça para conferir as permissões da conexão.' : undefined }) })
         } else if (result.page) {
           calendarWrote = true
           widgets.push({ type: 'notionPage', title: result.page.action === 'updated' ? 'Página atualizada no Notion' : 'Página criada no Notion', page: result.page })
