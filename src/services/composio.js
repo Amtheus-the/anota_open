@@ -99,5 +99,14 @@ export async function executeTool(userId, slug, args, connectedAccountId) {
     console.error('[composio]', slug, 'falhou:', String(data.error).slice(0, 300))
     throw new HttpError(502, 'O app não respondeu ao pedido')
   }
-  return data?.data ?? data
+  const result = data?.data ?? data
+  // algumas ferramentas devolvem o resultado como texto JSON
+  if (typeof result === 'string') {
+    try {
+      return JSON.parse(result)
+    } catch {
+      return result
+    }
+  }
+  return result
 }

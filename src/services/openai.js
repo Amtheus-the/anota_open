@@ -3,7 +3,7 @@ import { HttpError } from '../utils/validators.js'
 import { openAiTools, runTool } from './widgets.js'
 import { CATEGORY_NAMES, previewCorrection } from './categoryRules.js'
 import { composioConfigured } from './composio.js'
-import { calendarEvents, createCalendarEvent, deleteCalendarEvent, readGmailMessage, searchGmail } from './apps.js'
+import { appendNotionPage, calendarEvents, createCalendarEvent, createNotionPage, deleteCalendarEvent, readGmailMessage, readNotionPage, searchGmail, searchNotion } from './apps.js'
 
 const SYSTEM_PROMPT = `Você é o Anota Grana, um assistente de finanças pessoais em português do Brasil.
 Ajude o usuário a entender gastos, organizar o orçamento e tomar decisões com clareza.
@@ -64,6 +64,9 @@ Quando o lembrete for de uma conta, busque o valor e o vencimento reais nos dado
 Se a ferramenta devolver needs_connection, o usuário vê o cartão para autorizar: explique em 1 frase e não repita a chamada.
 REGRA DA AGENDA: só diga que criou, agendou, marcou ou apagou algo DEPOIS de chamar create_calendar_event ou delete_calendar_event e receber ok. Nunca confirme por conta própria.
 Se o usuário pediu para criar ou apagar e você ainda não chamou a ferramenta, chame agora. Se não achar o evento para apagar, diga que não encontrou.
+NOTION: use search_notion para achar páginas (ele só vê o que o usuário liberou: se vier vazio, diga para conferir as permissões da conexão), read_notion_page para ler e resumir, create_notion_page para criar uma página NOVA e append_notion_page para acrescentar no fim de uma existente.
+Para criar, o Notion exige a página onde ela ficará: se o usuário não disse onde, chame search_notion e PERGUNTE qual das páginas usar (ou, se só houver uma opção clara, diga qual vai usar). Escreva o markdown completo (títulos, listas, tarefas, valores reais dos dados dele).
+Nunca apague nem reescreva páginas. Só diga que criou ou atualizou DEPOIS de a ferramenta responder ok.
 Descreva exatamente o que o bloco mostra: não omita itens nem troque valores. Se a ferramenta voltar sem resultado, aí sim diga que não encontrou.`
 
 // Agentes que o chat pode criar (o front guarda a lista; aqui só validamos qual foi escolhido)
@@ -180,6 +183,63 @@ const calendarTools = [
   },
 ]
 
+// Notion (via Composio): buscar, ler e criar páginas só nas páginas que o usuário liberou. Nunca apaga nem reescreve.
+const notionTools = [
+  {
+    type: 'function',
+    function: {
+      name: 'search_notion',
+      description: 'Procura páginas e bancos de dados do Notion pelo título. Query vazia lista os mais recentes. Só enxerga o que o usuário liberou ao conectar.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Parte do título (ex.: "metas"). Vazio para listar.' },
+          kind: { type: 'string', enum: ['all', 'page', 'database'] },
+          reason: reasonParam,
+        },
+        required: ['reason'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_notion_page',
+      description: 'Lê o conteúdo de uma página do Notion (em markdown) a partir do id devolvido por search_notion (use o campo id, não o título).',
+      parameters: { type: 'object', properties: { page_id: { type: 'string', description: 'campo id da página em search_notion' }, reason: reasonParam }, required: ['page_id', 'reason'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_notion_page',
+      description: 'Cria uma página NOVA no Notion, dentro de uma página ou banco de dados existente (parent_id). Nunca altera páginas que já existem.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          parent_id: { type: 'string', description: 'campo id da página ou do banco de dados onde a nova será criada (de search_notion), não o título' },
+          markdown: { type: 'string', description: 'Conteúdo em markdown: títulos (##), listas (- ), tarefas (- [ ] ) e texto' },
+          reason: reasonParam,
+        },
+        required: ['title', 'parent_id', 'reason'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'append_notion_page',
+      description: 'Acrescenta texto no fim de uma página existente do Notion, sem apagar nem reescrever o que já está lá. Use só quando o usuário pediu.',
+      parameters: {
+        type: 'object',
+        properties: { page_id: { type: 'string', description: 'campo id da página em search_notion, não o título' }, title: { type: 'string', description: 'título da página, para mostrar ao usuário' }, text: { type: 'string', description: 'uma linha por bloco; use "## " para título, "- " para lista e "- [ ] " para tarefa' }, reason: reasonParam },
+        required: ['page_id', 'text', 'reason'],
+      },
+    },
+  },
+]
+
 // Título curto para a lista "Recentes" (ex.: "Gastos com transporte por app").
 // Roda em segundo plano; se falhar, o título provisório continua valendo.
 export async function generateTitle(userMessage, assistantReply) {
@@ -253,7 +313,7 @@ Se a agenda não estiver conectada, diga que a conexão é feita no site, em Min
 
 // Trava contra confirmação inventada: a IA às vezes escreve "lembrete criado" sem ter chamado a ferramenta
 const CLAIMS_CALENDAR_WRITE = /(criei|agendei|marquei|apaguei|removi|cancelei|exclu[ií]|lembrete (agendado|criado)|evento (criado|agendado)|foi (removido|apagado|criado|agendado|marcado|exclu[ií]do)|já (foi|está) (removido|apagado|agendado|marcado))/i
-const MENTIONS_CALENDAR = /(lembrete|evento|agenda|reunião|reuniao|compromisso)/i
+const MENTIONS_CALENDAR = /(lembrete|evento|agenda|reunião|reuniao|compromisso|notion|página|pagina)/i
 
 // Fora do modo Computer a IA não tem as ferramentas de apps: precisa dizer isso, em vez de tentar ou fingir
 const CHAT_MODE_PROMPT = `MODO: conversa normal. Aqui você NÃO tem acesso ao Gmail nem a outros apps conectados, só aos dados financeiros do Open Finance.
@@ -300,7 +360,7 @@ ${financialContext}` })
         messages,
         temperature: 0.4,
         // na última volta a IA já tem os blocos e só precisa escrever
-        ...(round < maxRounds - 1 ? { tools: [...(fin.accounts.length > 0 ? [...openAiTools, setCategoryTool] : []), createAgentTool, ...(gmailOn ? gmailTools : []), ...(calendarOn ? calendarTools : [])] } : {}),
+        ...(round < maxRounds - 1 ? { tools: [...(fin.accounts.length > 0 ? [...openAiTools, setCategoryTool] : []), createAgentTool, ...(gmailOn ? [...gmailTools, ...notionTools] : []), ...(calendarOn ? calendarTools : [])] } : {}),
       }),
       signal: AbortSignal.timeout(45_000),
     })
@@ -421,6 +481,39 @@ ${financialContext}` })
         } else {
           calendarWrote = true
           messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, apagado: true }) })
+        }
+        continue
+      }
+      if (['search_notion', 'read_notion_page', 'create_notion_page', 'append_notion_page'].includes(call.function.name)) {
+        let result
+        try {
+          if (call.function.name === 'search_notion') result = await searchNotion(userId, { query: args.query, kind: args.kind })
+          else if (call.function.name === 'read_notion_page') result = await readNotionPage(userId, args.page_id)
+          else if (call.function.name === 'create_notion_page') result = await createNotionPage(userId, { parentId: args.parent_id, title: args.title, markdown: args.markdown })
+          else result = await appendNotionPage(userId, { pageId: args.page_id, text: args.text, title: args.title })
+        } catch (err) {
+          console.error('[notion]', err.message)
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: false, error: 'Não consegui acessar o Notion agora' }) })
+          continue
+        }
+        if (result.needsConnection) {
+          if (!widgets.some((w) => w.type === 'connectApp' && w.app === 'notion')) widgets.push({ type: 'connectApp', title: 'Conectar o Notion', app: 'notion', name: 'Notion', reason: String(args.reason ?? 'para acessar as suas páginas').slice(0, 200) })
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ needs_connection: true, observacao: 'O usuário vê agora um cartão para autorizar o Notion. Depois que ele autorizar, ele pede de novo.' }) })
+          continue
+        }
+        if (result.error) {
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: false, error: result.error }) })
+          continue
+        }
+        if (result.pages) {
+          widgets.push({ type: 'notionPages', title: 'Páginas no Notion', count: result.pages.length, items: result.pages })
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, paginas: result.pages, observacao: result.pages.length === 0 ? 'Nada encontrado. O Notion só mostra o que o usuário liberou ao conectar: peça para conferir as permissões da conexão.' : undefined }) })
+        } else if (result.page) {
+          calendarWrote = true
+          widgets.push({ type: 'notionPage', title: result.page.action === 'updated' ? 'Página atualizada no Notion' : 'Página criada no Notion', page: result.page })
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, pagina: result.page }) })
+        } else {
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, conteudo_markdown: result.markdown, cortado: result.truncated }) })
         }
         continue
       }
