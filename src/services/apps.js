@@ -208,13 +208,16 @@ export async function searchNotion(userId, { query, kind } = {}) {
   const run = (q) => executeTool(userId, 'NOTION_SEARCH_NOTION_PAGE', { query: q, page_size: 25, ...filter }, connection.id)
   const results = (data) => (Array.isArray(data) ? data : data?.results ?? data?.pages ?? data?.items ?? [])
 
-  let found = results(await run(text))
+  const first = await run(text)
+  let found = results(first)
+  const more = Boolean(first?.has_more ?? first?.next_cursor)
   // o índice de busca do Notion pode atrasar: sem resultado, traz tudo e filtra aqui pelo título
   if (found.length === 0 && text) {
     const all = results(await run(''))
     found = all.filter((o) => notionTitle(o).toLowerCase().includes(text.toLowerCase()))
   }
   return {
+    more,
     pages: found.slice(0, 25).map((o) => ({ id: o.id, type: o.object ?? 'page', title: notionTitle(o) || '(sem título)', url: notionUrl(o.id, o.url), edited: o.last_edited_time ?? '' })),
   }
 }

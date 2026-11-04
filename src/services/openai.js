@@ -312,7 +312,7 @@ em linhas curtas. Não tem botão Desfazer: para apagar, liste os compromissos d
 Se a agenda não estiver conectada, diga que a conexão é feita no site, em Minha conta, Apps, e peça para ele voltar depois.`
 
 // Trava contra confirmação inventada: a IA às vezes escreve "lembrete criado" sem ter chamado a ferramenta
-const CLAIMS_CALENDAR_WRITE = /(criei|agendei|marquei|apaguei|removi|cancelei|exclu[ií]|lembrete (agendado|criado)|evento (criado|agendado)|foi (removido|apagado|criado|agendado|marcado|exclu[ií]do)|já (foi|está) (removido|apagado|agendado|marcado))/i
+const CLAIMS_CALENDAR_WRITE = /((criei|agendei|marquei|apaguei|removi|cancelei|exclu[ií])(?![a-zà-úç])|lembrete (agendado|criado)|evento (criado|agendado)|foi (removido|apagado|criado|agendado|marcado|exclu[ií]do)|já (foi|está) (removido|apagado|agendado|marcado))/i
 const MENTIONS_CALENDAR = /(lembrete|evento|agenda|reunião|reuniao|compromisso|notion|página|pagina)/i
 
 // Fora do modo Computer a IA não tem as ferramentas de apps: precisa dizer isso, em vez de tentar ou fingir
@@ -506,8 +506,8 @@ ${financialContext}` })
           continue
         }
         if (result.pages) {
-          widgets.push({ type: 'notionPages', title: 'Páginas no Notion', count: result.pages.length, items: result.pages })
-          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, paginas: result.pages, observacao: result.pages.length === 0 ? 'Nada encontrado. O Notion só mostra o que o usuário liberou ao conectar: peça para conferir as permissões da conexão.' : undefined }) })
+          widgets.push({ type: 'notionPages', title: 'Páginas no Notion', count: result.pages.length, more: Boolean(result.more), items: result.pages })
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, paginas: result.pages, mais_paginas_alem_destas: Boolean(result.more), observacao: result.pages.length === 0 ? 'Nada encontrado. O Notion só mostra o que o usuário liberou ao conectar: peça para conferir as permissões da conexão.' : undefined }) })
         } else if (result.page) {
           calendarWrote = true
           widgets.push({ type: 'notionPage', title: result.page.action === 'updated' ? 'Página atualizada no Notion' : 'Página criada no Notion', page: result.page })
