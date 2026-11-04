@@ -6,7 +6,7 @@ export const APPS = [
   { slug: 'googlecalendar', name: 'Google Calendar', text: 'Criar lembretes de vencimento', ready: true },
   { slug: 'notion', name: 'Notion', text: 'Acompanhar metas financeiras', ready: true },
   { slug: 'googledrive', name: 'Google Drive', text: 'Salvar relatórios e comprovantes', ready: false },
-  { slug: 'trello', name: 'Trello', text: 'Organizar tarefas e metas em quadros kanban', ready: false },
+  { slug: 'trello', name: 'Trello', text: 'Organizar tarefas e metas em quadros kanban', ready: true },
   { slug: 'googlemeet', name: 'Google Meet', text: 'Agendar reuniões e videochamadas', ready: true },
 ]
 
@@ -303,4 +303,106 @@ export async function appendNotionPage(userId, { pageId, text, title } = {}) {
   if (target.error) return { error: target.error }
   await executeTool(userId, 'NOTION_ADD_MULTIPLE_PAGE_CONTENT', { parent_block_id: target.id, content_blocks: blocks }, connection.id)
   return { page: { id: target.id, title: clean(title, 200) || target.title || 'Página', url: notionUrl(target.id), action: 'updated' } }
+}
+
+// ---------- Trello ----------
+// A Composio devolve listas ora direto, ora dentro de response_data/data: lê o que vier
+const asList = (d) => {
+  const v = Array.isArray(d) ? d : d?.response_data ?? d?.data ?? d?.items ?? d?.boards ?? d?.lists ?? d?.cards
+  return Array.isArray(v) ? v : []
+}
+const sameText = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase()
+
+// acha por id (ou código curto) ou pelo nome (exato, ou o único que contém o texto)
+function pickByName(list, value) {
+  const text = String(value ?? '').trim()
+  if (!text) return { error: 'Informe o nome ou o id' }
+  const byId = list.find((x) => x.id === text || x.shortLink === text)
+  if (byId) return { item: byId }
+  const exact = list.filter((x) => sameText(x.name, text))
+  if (exact.length === 1) return { item: exact[0] }
+  const partial = exact.length ? exact : list.filter((x) => String(x.name ?? '').toLowerCase().includes(text.toLowerCase()))
+  if (partial.length === 1) return { item: partial[0] }
+  return { error: partial.length > 1 ? `Mais de um combina com "${text}": ${partial.slice(0, 6).map((x) => x.name).join(', ')}. Pergunte qual` : `Não achei "${text}"` }
+}
+
+async function trelloBoards(userId, connection) {
+  const data = await executeTool(userId, 'TRELLO_GET_MEMBERS_BOARDS_BY_ID_MEMBER', { idMember: 'me', filter: 'open', fields: 'name,url,shortUrl,shortLink,closed' }, connection.id)
+  return asList(data).filter((b) => b.id && !b.closed).map((b) => ({ id: b.id, name: b.name ?? '(sem nome)', url: b.shortUrl ?? b.url ?? null, shortLink: b.shortLink }))
+}
+
+async function trelloLists(userId, connection, boardId, withCards) {
+  const data = await executeTool(
+    userId,
+    'TRELLO_GET_BOARDS_LISTS_BY_ID_BOARD',
+    { idBoard: boardId, filter: 'open', ...(withCards ? { cards: 'open', card_fields: 'name,due,url,shortUrl,idList,closed' } : {}) },
+    connection.id,
+  )
+  return asList(data).filter((l) => l.id && !l.closed).map((l) => ({
+    id: l.id,
+    name: l.name ?? '(sem nome)',
+    cards: (Array.isArray(l.cards) ? l.cards : []).filter((c) => c.id && !c.closed).map((c) => ({ id: c.id, name: c.name ?? '(sem nome)', due: c.due ?? null, url: c.shortUrl ?? c.url ?? null })),
+  }))
+}
+
+// Sem board: lista os quadros. Com board (id ou nome): mostra as listas e os cartões abertos.
+export async function trelloOverview(userId, { board } = {}) {
+  const connection = await connectionFor(userId, 'trello')
+  if (!connection) return { needsConnection: true }
+  const boards = await trelloBoards(userId, connection)
+  if (!board) return { boards: boards.slice(0, 30) }
+  const picked = pickByName(boards, board)
+  if (picked.error) return { error: picked.error }
+  const lists = (await trelloLists(userId, connection, picked.item.id, true)).slice(0, 15)
+  console.log('[trello] quadro', picked.item.name, '| listas:', lists.length, '| cartões:', lists.reduce((n, l) => n + l.cards.length, 0))
+  return { board: { id: picked.item.id, name: picked.item.name, url: picked.item.url, lists: lists.map((l) => ({ ...l, cards: l.cards.slice(0, 40) })) } }
+}
+
+const dueOf = (value) => {
+  const text = String(value ?? '').trim()
+  if (!text) return undefined
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return `${text}T12:00:00-03:00`
+  return /^\d{4}-\d{2}-\d{2}T/.test(text) ? text : undefined
+}
+
+// Cria um cartão numa lista do quadro. Não apaga nem arquiva nada.
+export async function createTrelloCard(userId, { board, list, name, description, due } = {}) {
+  const connection = await connectionFor(userId, 'trello')
+  if (!connection) return { needsConnection: true }
+  const title = clean(name, 200)
+  if (!title) return { error: 'Informe o título do cartão' }
+  const boards = await trelloBoards(userId, connection)
+  const pickedBoard = pickByName(boards, board)
+  if (pickedBoard.error) return { error: pickedBoard.error }
+  const lists = await trelloLists(userId, connection, pickedBoard.item.id, false)
+  const pickedList = pickByName(lists, list)
+  if (pickedList.error) return { error: pickedList.error }
+
+  const created = await executeTool(
+    userId,
+    'TRELLO_ADD_CARDS',
+    { idList: pickedList.item.id, name: title, ...(description ? { desc: String(description).slice(0, 8000) } : {}), ...(dueOf(due) ? { due: dueOf(due) } : {}) },
+    connection.id,
+  )
+  const card = created?.response_data ?? created?.card ?? created
+  if (!card?.id) return { error: 'O Trello não confirmou a criação do cartão' }
+  return { card: { id: card.id, name: title, board: pickedBoard.item.name, list: pickedList.item.name, url: card.shortUrl ?? card.url ?? null, due: dueOf(due) ?? null, action: 'created' } }
+}
+
+// Move um cartão (por id ou título) para outra lista do mesmo quadro
+export async function moveTrelloCard(userId, { board, card, toList } = {}) {
+  const connection = await connectionFor(userId, 'trello')
+  if (!connection) return { needsConnection: true }
+  const boards = await trelloBoards(userId, connection)
+  const pickedBoard = pickByName(boards, board)
+  if (pickedBoard.error) return { error: pickedBoard.error }
+  const lists = await trelloLists(userId, connection, pickedBoard.item.id, true)
+  const target = pickByName(lists, toList)
+  if (target.error) return { error: target.error }
+  const cards = lists.flatMap((l) => l.cards.map((c) => ({ ...c, listName: l.name })))
+  const pickedCard = pickByName(cards, card)
+  if (pickedCard.error) return { error: pickedCard.error }
+
+  await executeTool(userId, 'TRELLO_UPDATE_CARDS_BY_ID_CARD', { idCard: pickedCard.item.id, idList: target.item.id }, connection.id)
+  return { card: { id: pickedCard.item.id, name: pickedCard.item.name, board: pickedBoard.item.name, list: target.item.name, from: pickedCard.item.listName, url: pickedCard.item.url, action: 'moved' } }
 }

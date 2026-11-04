@@ -3,7 +3,7 @@ import { HttpError } from '../utils/validators.js'
 import { openAiTools, runTool } from './widgets.js'
 import { CATEGORY_NAMES, previewCorrection } from './categoryRules.js'
 import { composioConfigured } from './composio.js'
-import { appendNotionPage, calendarEvents, createCalendarEvent, createNotionPage, deleteCalendarEvent, readGmailMessage, readNotionPage, searchGmail, searchNotion } from './apps.js'
+import { appendNotionPage, calendarEvents, createCalendarEvent, createNotionPage, createTrelloCard, deleteCalendarEvent, moveTrelloCard, readGmailMessage, readNotionPage, searchGmail, searchNotion, trelloOverview } from './apps.js'
 
 const SYSTEM_PROMPT = `Você é o Anota Grana, um assistente de finanças pessoais em português do Brasil.
 Ajude o usuário a entender gastos, organizar o orçamento e tomar decisões com clareza.
@@ -66,6 +66,9 @@ GOOGLE MEET: se o usuário pedir reunião online, videochamada ou Meet, chame cr
 NUNCA confirme que existe um compromisso (nem repita horário ou link) com base na conversa: antes, sempre consulte list_calendar_events.
 REGRA DA AGENDA: só diga que criou, agendou, marcou ou apagou algo DEPOIS de chamar create_calendar_event ou delete_calendar_event e receber ok. Nunca confirme por conta própria.
 Se o usuário pediu para criar ou apagar e você ainda não chamou a ferramenta, chame agora. Se não achar o evento para apagar, diga que não encontrou.
+TRELLO: list_trello sem board mostra os quadros; com board mostra listas e cartões. create_trello_card cria um cartão (board, lista e título) e move_trello_card muda um cartão de lista.
+Se o usuário não disse o quadro ou a lista, chame list_trello e pergunte qual usar. Crie ou mova DIRETO quando o pedido já traz quadro, lista e cartão. Você NÃO apaga nem arquiva cartões: diga que isso o usuário faz no Trello.
+Só diga que criou ou moveu um cartão DEPOIS de create_trello_card ou move_trello_card devolver ok; se vier erro, diga que NADA foi feito.
 NOTION: use search_notion para achar páginas (ele só vê o que o usuário liberou: se vier vazio, diga para conferir as permissões da conexão), read_notion_page para ler e resumir, create_notion_page para criar uma página NOVA e append_notion_page para acrescentar no fim de uma existente.
 Para criar, o Notion exige a página onde ela ficará: se o usuário não disse onde, chame search_notion e PERGUNTE qual das páginas usar (ou, se só houver uma opção clara, diga qual vai usar). Escreva o markdown completo (títulos, listas, tarefas, valores reais dos dados dele).
 Só crie páginas DENTRO de páginas com pode_ser_pai=true: itens de um banco de dados (pode_ser_pai=false) não aceitam subpáginas. Se o usuário pedir uma que não aceita, explique em 1 frase e ofereça páginas que aceitam; se a ferramenta devolver erro, diga com clareza que NADA foi criado.
@@ -247,6 +250,49 @@ const notionTools = [
   },
 ]
 
+// Trello (via Composio): ver quadros, criar e mover cartões. Nunca apaga nem arquiva.
+const trelloTools = [
+  {
+    type: 'function',
+    function: {
+      name: 'list_trello',
+      description: 'Sem "board": lista os quadros do Trello do usuário. Com "board" (nome ou id): mostra as listas e os cartões abertos desse quadro.',
+      parameters: { type: 'object', properties: { board: { type: 'string', description: 'nome ou id do quadro; vazio para listar os quadros' }, reason: reasonParam }, required: ['reason'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_trello_card',
+      description: 'Cria um cartão NOVO numa lista de um quadro do Trello. Só quando o usuário pediu.',
+      parameters: {
+        type: 'object',
+        properties: {
+          board: { type: 'string', description: 'nome ou id do quadro' },
+          list: { type: 'string', description: 'nome ou id da lista (coluna), ex.: "A fazer"' },
+          name: { type: 'string', description: 'título do cartão' },
+          description: { type: 'string' },
+          due: { type: 'string', description: 'prazo opcional, AAAA-MM-DD ou AAAA-MM-DDTHH:MM:SS-03:00' },
+          reason: reasonParam,
+        },
+        required: ['board', 'list', 'name', 'reason'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'move_trello_card',
+      description: 'Move um cartão para outra lista do mesmo quadro (ex.: de "A fazer" para "Feito"). Só quando o usuário pediu.',
+      parameters: {
+        type: 'object',
+        properties: { board: { type: 'string' }, card: { type: 'string', description: 'título ou id do cartão' }, to_list: { type: 'string', description: 'lista de destino' }, reason: reasonParam },
+        required: ['board', 'card', 'to_list', 'reason'],
+      },
+    },
+  },
+]
+
 // Título curto para a lista "Recentes" (ex.: "Gastos com transporte por app").
 // Roda em segundo plano; se falhar, o título provisório continua valendo.
 export async function generateTitle(userMessage, assistantReply) {
@@ -327,7 +373,7 @@ const PROMISES_WRITE = /((vou|já vou|irei) (criar|montar|agendar|marcar|adicion
 // "está marcada" ou um link do Meet sem ter criado nada (e sem ter consultado a agenda) é invenção
 const CLAIMS_BOOKED = /((est[áa]|foi|ficou|j[áa] est[áa]) (marcad|agendad|criad)[oa](?![a-zà-úç])|meet.google.com)/i
 const ASKS_WRITE = /(cri[ae]|marqu|agend|lembr|acrescent|adicion|anot|mont[ae]|fa[çc]a)/i
-const MENTIONS_CALENDAR = /(lembrete|evento|agenda|reunião|reuniao|compromisso|notion|página|pagina)/i
+const MENTIONS_CALENDAR = /(lembrete|evento|agenda|reunião|reuniao|compromisso|notion|página|pagina|trello|cartão|cartao|quadro)/i
 
 // Fora do modo Computer a IA não tem as ferramentas de apps: precisa dizer isso, em vez de tentar ou fingir
 const CHAT_MODE_PROMPT = `MODO: conversa normal. Aqui você NÃO tem acesso ao Gmail nem a outros apps conectados, só aos dados financeiros do Open Finance.
@@ -379,7 +425,7 @@ ${financialContext}` })
         messages,
         temperature: 0.4,
         // na última volta a IA já tem os blocos e só precisa escrever
-        ...(round < maxRounds - 1 ? { tools: [...(fin.accounts.length > 0 ? [...openAiTools, setCategoryTool] : []), createAgentTool, ...(gmailOn ? [...gmailTools, ...notionTools] : []), ...(calendarOn ? calendarTools : [])], ...(forceNow ? { tool_choice: { type: 'function', function: { name: forceNow } } } : {}) } : {}),
+        ...(round < maxRounds - 1 ? { tools: [...(fin.accounts.length > 0 ? [...openAiTools, setCategoryTool] : []), createAgentTool, ...(gmailOn ? [...gmailTools, ...notionTools, ...trelloTools] : []), ...(calendarOn ? calendarTools : [])], ...(forceNow ? { tool_choice: { type: 'function', function: { name: forceNow } } } : {}) } : {}),
       }),
       signal: AbortSignal.timeout(45_000),
     })
@@ -402,11 +448,13 @@ ${financialContext}` })
         const lastUser = String(history[history.length - 1]?.content ?? '')
         if ((PROMISES_WRITE.test(reply) || inventedBooking) && ASKS_WRITE.test(lastUser) && !/apag|cancel|remov/i.test(lastUser)) {
           const notion = /notion|página|pagina/i.test(lastUser)
-          if (notion && gmailOn) forced = /acrescent|adicion/i.test(lastUser) ? 'append_notion_page' : 'create_notion_page'
-          else if (!notion) forced = 'create_calendar_event'
+          const trello = /trello|cart[aã]o|quadro/i.test(lastUser)
+          if (trello && gmailOn) forced = /mov[ae]|passe|mande/i.test(lastUser) ? 'move_trello_card' : 'create_trello_card'
+          else if (notion && gmailOn) forced = /acrescent|adicion/i.test(lastUser) ? 'append_notion_page' : 'create_notion_page'
+          else if (!notion && !trello) forced = 'create_calendar_event'
         }
         messages.push(message)
-        messages.push({ role: 'system', content: 'ATENÇÃO: você escreveu que criou, agendou, apagou ou VAI fazer algo (agenda ou Notion), mas NÃO chamou a ferramenta. Chame agora a ferramenta certa (create_calendar_event, delete_calendar_event, create_notion_page ou append_notion_page; para apagar, liste antes e use o id certo). Se não for possível, diga com clareza que NÃO foi feito. Não responda de novo com promessa.' })
+        messages.push({ role: 'system', content: 'ATENÇÃO: você escreveu que criou, agendou, apagou ou VAI fazer algo (agenda, Notion ou Trello), mas NÃO chamou a ferramenta. Chame agora a ferramenta certa (create_calendar_event, delete_calendar_event, create_notion_page, append_notion_page, create_trello_card ou move_trello_card; para apagar, liste antes e use o id certo). Se não for possível, diga com clareza que NÃO foi feito. Não responda de novo com promessa.' })
         continue
       }
       // disse que a agenda está livre sem ter olhado: manda consultar antes de o usuário acreditar
@@ -527,6 +575,41 @@ ${financialContext}` })
         } else {
           calendarWrote = true
           messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, apagado: true }) })
+        }
+        continue
+      }
+      if (['list_trello', 'create_trello_card', 'move_trello_card'].includes(call.function.name)) {
+        let result
+        try {
+          if (call.function.name === 'list_trello') result = await trelloOverview(userId, { board: args.board })
+          else if (call.function.name === 'create_trello_card') result = await createTrelloCard(userId, { board: args.board, list: args.list, name: args.name, description: args.description, due: args.due })
+          else result = await moveTrelloCard(userId, { board: args.board, card: args.card, toList: args.to_list })
+        } catch (err) {
+          console.error('[trello]', err.message)
+          if (call.function.name !== 'list_trello') writeError = 'o Trello recusou o pedido'
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: false, error: 'O Trello recusou o pedido. NADA foi feito: diga isso ao usuário.' }) })
+          continue
+        }
+        if (result.needsConnection) {
+          if (!widgets.some((w) => w.type === 'connectApp' && w.app === 'trello')) widgets.push({ type: 'connectApp', title: 'Conectar o Trello', app: 'trello', name: 'Trello', reason: String(args.reason ?? 'para acessar os seus quadros').slice(0, 200) })
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ needs_connection: true, observacao: 'O usuário vê agora um cartão para autorizar o Trello. Depois que ele autorizar, ele pede de novo.' }) })
+          continue
+        }
+        if (result.error) {
+          if (call.function.name !== 'list_trello') writeError = result.error
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: false, error: result.error }) })
+          continue
+        }
+        if (result.boards) {
+          widgets.push({ type: 'trelloBoards', title: 'Quadros no Trello', items: result.boards })
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, quadros: result.boards.map((b) => ({ id: b.id, nome: b.name })), observacao: result.boards.length === 0 ? 'Nenhum quadro encontrado.' : undefined }) })
+        } else if (result.board) {
+          widgets.push({ type: 'trelloBoard', title: result.board.name, board: result.board })
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, quadro: result.board.name, listas: result.board.lists.map((l) => ({ nome: l.name, cartoes: l.cards.map((c) => ({ id: c.id, titulo: c.name, prazo: c.due })) })) }) })
+        } else {
+          calendarWrote = true
+          widgets.push({ type: 'trelloCard', title: result.card.action === 'moved' ? 'Cartão movido no Trello' : 'Cartão criado no Trello', card: result.card })
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, cartao: result.card }) })
         }
         continue
       }
