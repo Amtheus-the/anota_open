@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import { config } from '../config.js'
 import { HttpError } from '../utils/validators.js'
 
@@ -23,6 +24,35 @@ export async function transcribeAudio(buffer, mimetype = 'audio/ogg') {
     throw new HttpError(502, 'Não consegui transcrever o áudio')
   }
   return String((await response.json().catch(() => ({})))?.text ?? '').trim()
+}
+
+// O WhatsApp guarda o áudio cifrado (.enc). A chave (mediaKey) vem no próprio aviso: deriva as chaves (HKDF),
+// confere o selo (MAC) e decifra (AES-256-CBC). Os últimos 10 bytes do arquivo são o selo.
+export function decryptWhatsAppMedia(encrypted, mediaKeyBase64, info = 'WhatsApp Audio Keys') {
+  const expanded = Buffer.from(crypto.hkdfSync('sha256', Buffer.from(mediaKeyBase64, 'base64'), Buffer.alloc(0), info, 112))
+  const iv = expanded.subarray(0, 16)
+  const cipherKey = expanded.subarray(16, 48)
+  const macKey = expanded.subarray(48, 80)
+  if (encrypted.length <= 10) throw new Error('arquivo curto demais')
+  const body = encrypted.subarray(0, encrypted.length - 10)
+  const mac = crypto.createHmac('sha256', macKey).update(iv).update(body).digest().subarray(0, 10)
+  if (!crypto.timingSafeEqual(mac, encrypted.subarray(encrypted.length - 10))) throw new Error('selo do arquivo não confere')
+  const decipher = crypto.createDecipheriv('aes-256-cbc', cipherKey, iv)
+  return Buffer.concat([decipher.update(body), decipher.final()])
+}
+
+// só baixa dos servidores de mídia do WhatsApp (o endereço vem num aviso; nunca busca endereço de terceiros)
+const WHATSAPP_MEDIA_HOST = /^(?:[a-z0-9-]+.)*whatsapp.net$/i
+async function downloadEncrypted(audio) {
+  const candidates = [audio.url, audio.directPath && `https://mmg.whatsapp.net${audio.directPath}`].filter(Boolean)
+  for (const link of candidates) {
+    let url
+    try { url = new URL(link) } catch { continue }
+    if (url.protocol !== 'https:' || !WHATSAPP_MEDIA_HOST.test(url.hostname)) continue
+    const response = await fetch(url, { signal: AbortSignal.timeout(30_000) }).catch(() => null)
+    if (response?.ok) return Buffer.from(await response.arrayBuffer())
+  }
+  return null
 }
 
 // Baixa o áudio recebido pelo WhatsApp (W-API). O formato exato do aviso varia: tenta os jeitos conhecidos e registra o que veio.
@@ -51,6 +81,13 @@ export async function downloadWhatsAppAudio(payload) {
   }
 
   const attempts = []
+  if (audio.mediaKey && (audio.url || audio.directPath)) {
+    attempts.push(['decifrar', async () => {
+      const encrypted = await downloadEncrypted(audio)
+      if (!encrypted) return { status: 'não baixou do servidor do WhatsApp' }
+      return { buffer: decryptWhatsAppMedia(encrypted, audio.mediaKey) }
+    }])
+  }
   const direct = audio.url ?? audio.mediaUrl ?? audio.fileUrl ?? payload?.mediaUrl
   if (direct && !/\.enc(\?|$)/.test(String(direct))) attempts.push(['url', () => fetchBuffer(direct)])
 
