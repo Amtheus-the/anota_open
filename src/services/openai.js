@@ -63,6 +63,7 @@ crie DIRETO, é só na agenda dele e dá para desfazer; NUNCA coloque convidados
 Quando o lembrete for de uma conta, busque o valor e o vencimento reais nos dados do banco ou nos e-mails antes de criar, e ponha-os no título e na descrição. Para apagar, use delete_calendar_event com o id do evento.
 Se a ferramenta devolver needs_connection, o usuário vê o cartão para autorizar: explique em 1 frase e não repita a chamada.
 GOOGLE MEET: se o usuário pedir reunião online, videochamada ou Meet, chame create_calendar_event com meet=true e passe o link devolvido (meetLink) na resposta. Se meetLink vier vazio, diga que o evento foi criado mas o Google não gerou o link. Você NÃO convida outras pessoas: diga que ele pode copiar o link e enviar a quem quiser.
+NUNCA confirme que existe um compromisso (nem repita horário ou link) com base na conversa: antes, sempre consulte list_calendar_events.
 REGRA DA AGENDA: só diga que criou, agendou, marcou ou apagou algo DEPOIS de chamar create_calendar_event ou delete_calendar_event e receber ok. Nunca confirme por conta própria.
 Se o usuário pediu para criar ou apagar e você ainda não chamou a ferramenta, chame agora. Se não achar o evento para apagar, diga que não encontrou.
 NOTION: use search_notion para achar páginas (ele só vê o que o usuário liberou: se vier vazio, diga para conferir as permissões da conexão), read_notion_page para ler e resumir, create_notion_page para criar uma página NOVA e append_notion_page para acrescentar no fim de uma existente.
@@ -410,11 +411,11 @@ ${financialContext}` })
       }
       // disse que a agenda está livre sem ter olhado: manda consultar antes de o usuário acreditar
       const asked = String(history[history.length - 1]?.content ?? '')
-      if (calendarOn && !listedCalendar && !calendarWrote && nudges < 2 && /(agenda|reuni|compromisso|evento|marcado)/i.test(asked) && /(nenhum|nenhuma|livre|não tem|não há|sem compromisso)/i.test(reply)) {
+      if (calendarOn && !listedCalendar && !calendarWrote && nudges < 2 && /(agenda|reuni|compromisso|evento|marcad|dia d)/i.test(asked) && !ASKS_WRITE.test(asked) && /(reuni|compromisso|evento|marcad|agenda|livre|meet|d{1,2}s?h)/i.test(reply)) {
         nudges += 1
         forced = 'list_calendar_events'
         messages.push(message)
-        messages.push({ role: 'system', content: 'ATENÇÃO: você disse que não há compromissos sem consultar a agenda. Chame list_calendar_events agora com o período pedido e responda só com o que ela devolver.' })
+        messages.push({ role: 'system', content: 'ATENÇÃO: você falou de compromissos ou da agenda sem consultá-la agora (o que aparece na conversa pode estar errado ou já ter sido apagado). Chame list_calendar_events com o período pedido e responda só com o que ela devolver, sem repetir links ou horários de mensagens antigas.' })
         continue
       }
       // continuou dizendo que marcou sem ter criado nada: avisa com honestidade
