@@ -62,6 +62,7 @@ AGENDA (Google Calendar): para ver compromissos use list_calendar_events (consul
 crie DIRETO, é só na agenda dele e dá para desfazer; NUNCA coloque convidados nem mande e-mail de convite. Use datas e horas de Brasília, calcule "amanhã" e dias da semana a partir do "Agora" informado, e confirme em 1 frase com dia, hora e o que foi gravado.
 Quando o lembrete for de uma conta, busque o valor e o vencimento reais nos dados do banco ou nos e-mails antes de criar, e ponha-os no título e na descrição. Para apagar, use delete_calendar_event com o id do evento.
 Se a ferramenta devolver needs_connection, o usuário vê o cartão para autorizar: explique em 1 frase e não repita a chamada.
+GOOGLE MEET: se o usuário pedir reunião online, videochamada ou Meet, chame create_calendar_event com meet=true e passe o link devolvido (meetLink) na resposta. Se meetLink vier vazio, diga que o evento foi criado mas o Google não gerou o link. Você NÃO convida outras pessoas: diga que ele pode copiar o link e enviar a quem quiser.
 REGRA DA AGENDA: só diga que criou, agendou, marcou ou apagou algo DEPOIS de chamar create_calendar_event ou delete_calendar_event e receber ok. Nunca confirme por conta própria.
 Se o usuário pediu para criar ou apagar e você ainda não chamou a ferramenta, chame agora. Se não achar o evento para apagar, diga que não encontrou.
 NOTION: use search_notion para achar páginas (ele só vê o que o usuário liberou: se vier vazio, diga para conferir as permissões da conexão), read_notion_page para ler e resumir, create_notion_page para criar uma página NOVA e append_notion_page para acrescentar no fim de uma existente.
@@ -171,6 +172,7 @@ const calendarTools = [
           duration_minutes: { type: 'integer', description: 'Duração em minutos. Padrão 15.' },
           description: { type: 'string', description: 'Detalhes úteis (valores, vencimento, de onde vem a informação)' },
           reminders: { type: 'array', items: { type: 'integer' }, description: 'Avisos na tela, em minutos antes do início. Padrão [60, 0].' },
+          meet: { type: 'boolean', description: 'true para criar também um link de videochamada do Google Meet no evento (reunião online). Só use quando o usuário pedir reunião/videochamada/Meet.' },
           reason: reasonParam,
         },
         required: ['title', 'start', 'reason'],
@@ -473,7 +475,7 @@ ${financialContext}` })
         let result
         try {
           if (call.function.name === 'list_calendar_events') result = await calendarEvents(userId, { from: args.from, to: args.to })
-          else if (call.function.name === 'create_calendar_event') result = await createCalendarEvent(userId, { title: args.title, start: args.start, durationMinutes: args.duration_minutes, description: args.description, reminders: args.reminders })
+          else if (call.function.name === 'create_calendar_event') result = await createCalendarEvent(userId, { title: args.title, start: args.start, durationMinutes: args.duration_minutes, description: args.description, reminders: args.reminders, meet: args.meet })
           else result = await deleteCalendarEvent(userId, args.event_id, args.calendar_id)
         } catch (err) {
           console.error('[agenda]', err.message)

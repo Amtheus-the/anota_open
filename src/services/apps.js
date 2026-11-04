@@ -7,7 +7,7 @@ export const APPS = [
   { slug: 'notion', name: 'Notion', text: 'Acompanhar metas financeiras', ready: true },
   { slug: 'googledrive', name: 'Google Drive', text: 'Salvar relatórios e comprovantes', ready: false },
   { slug: 'trello', name: 'Trello', text: 'Organizar tarefas e metas em quadros kanban', ready: false },
-  { slug: 'googlemeet', name: 'Google Meet', text: 'Agendar reuniões e videochamadas', ready: false },
+  { slug: 'googlemeet', name: 'Google Meet', text: 'Agendar reuniões e videochamadas', ready: true },
 ]
 
 const clamp = (n, min, max, fallback) => Math.min(max, Math.max(min, Number.isFinite(Number(n)) ? Number(n) : fallback))
@@ -125,11 +125,14 @@ export async function calendarEvents(userId, { from, to } = {}) {
   return { events: events.slice(0, 60), calendars: calendars.map((c) => c.summary ?? c.id), failed: settled.filter((r) => r.status === 'rejected').length }
 }
 
+// Link da videochamada (Google Meet) que a agenda devolve junto com o evento
+const meetLinkOf = (e) => e?.hangoutLink ?? e?.conferenceData?.entryPoints?.find((p) => p.entryPointType === 'video')?.uri ?? null
+
 const clean = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max)
 
 // Cria um evento na agenda principal, só do usuário (sem convidados e sem e-mail de convite).
 // start: AAAA-MM-DDTHH:MM no horário de Brasília. reminders: minutos antes do início (aviso na tela).
-export async function createCalendarEvent(userId, { title, start, durationMinutes, description, reminders } = {}) {
+export async function createCalendarEvent(userId, { title, start, durationMinutes, description, reminders, meet } = {}) {
   const connection = await connectionFor(userId, 'googlecalendar')
   if (!connection) return { needsConnection: true }
   const when = String(start ?? '').match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/)
@@ -148,6 +151,7 @@ export async function createCalendarEvent(userId, { title, start, durationMinute
       description: clean(description, 1000),
       calendar_id: 'primary',
       send_updates: 'none',
+      create_meeting_room: Boolean(meet), // só gera link de videochamada quando foi pedido
     },
     connection.id,
   )
@@ -173,6 +177,8 @@ export async function createCalendarEvent(userId, { title, start, durationMinute
       start: `${when[1]}T${when[2]}:00${OFFSET}`,
       end: end.toISOString(),
       link: event?.htmlLink ?? null,
+      meetLink: meetLinkOf(event) ?? meetLinkOf(created),
+      meetRequested: Boolean(meet),
       reminders: wanted,
     },
   }

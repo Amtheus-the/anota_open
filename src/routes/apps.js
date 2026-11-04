@@ -23,7 +23,8 @@ router.get('/', async (req, res) => {
       slug,
       name,
       text,
-      status: connected.some((c) => c.app === slug) ? 'connected' : available && ready ? 'available' : 'soon',
+      // o Meet não tem login próprio: vem junto com o Google Calendar
+      status: connected.some((c) => c.app === (slug === 'googlemeet' ? 'googlecalendar' : slug)) ? 'connected' : available && ready ? 'available' : 'soon',
     })),
   })
 })
@@ -32,7 +33,7 @@ router.post('/:slug/connect', async (req, res) => {
   const app = appBySlug(req.params.slug)
   if (!app || !app.ready) throw new HttpError(404, 'Este app ainda não está disponível')
   if (!composioConfigured()) throw new HttpError(503, 'As conexões com apps ainda não estão ativadas')
-  const redirectUrl = await startConnection(req.userId, app.slug, `${config.frontendUrl}/apps/callback`)
+  const redirectUrl = await startConnection(req.userId, app.slug === 'googlemeet' ? 'googlecalendar' : app.slug, `${config.frontendUrl}/apps/callback`)
   res.json({ redirectUrl })
 })
 
@@ -47,6 +48,7 @@ router.delete('/googlecalendar/events/:eventId', async (req, res) => {
 router.delete('/:slug', async (req, res) => {
   const app = appBySlug(req.params.slug)
   if (!app) throw new HttpError(404, 'App não encontrado')
+  if (app.slug === 'googlemeet') throw new HttpError(409, 'O Google Meet vem junto com o Google Calendar: para desconectar, desconecte o Google Calendar')
   if (!composioConfigured()) throw new HttpError(503, 'As conexões com apps ainda não estão ativadas')
   await removeConnections(req.userId, app.slug)
   res.json({ ok: true })
