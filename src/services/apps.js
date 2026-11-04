@@ -243,7 +243,7 @@ export async function readNotionPage(userId, pageId) {
   const data = await executeTool(userId, 'NOTION_GET_PAGE_MARKDOWN', { page_id: target.id }, connection.id)
   const markdown = typeof data === 'string' ? data : data?.markdown ?? data?.content ?? data?.data ?? ''
   const text = String(markdown)
-  return { markdown: text.slice(0, 6000), truncated: text.length > 6000 }
+  return { markdown: text.slice(0, 40000), truncated: text.length > 40000, totalChars: text.length }
 }
 
 // Cria uma página NOVA dentro de uma página ou banco de dados que o usuário liberou. Nunca altera nem apaga as que já existem.

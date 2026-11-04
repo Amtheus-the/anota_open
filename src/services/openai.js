@@ -513,7 +513,7 @@ ${financialContext}` })
           widgets.push({ type: 'notionPage', title: result.page.action === 'updated' ? 'Página atualizada no Notion' : 'Página criada no Notion', page: result.page })
           messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, pagina: result.page }) })
         } else {
-          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, conteudo_markdown: result.markdown, cortado: result.truncated }) })
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, conteudo_markdown: result.markdown, cortado: result.truncated, observacao: result.truncated ? 'A página é maior que o limite: você leu só o começo. Diga isso ao usuário.' : 'Você leu a página INTEIRA. Ao resumir, passe por TODAS as seções (cada título #) em ordem, sem parar nas primeiras, e cite números e nomes que estão lá.' }) })
         }
         continue
       }
