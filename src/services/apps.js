@@ -5,7 +5,6 @@ export const APPS = [
   { slug: 'gmail', name: 'Gmail', text: 'Encontrar boletos e assinaturas', ready: true },
   { slug: 'googlecalendar', name: 'Google Calendar', text: 'Criar lembretes de vencimento', ready: true },
   { slug: 'notion', name: 'Notion', text: 'Acompanhar metas financeiras', ready: true },
-  { slug: 'googlesheets', name: 'Google Sheets', text: 'Organizar gastos e orçamento', ready: false },
   { slug: 'googledrive', name: 'Google Drive', text: 'Salvar relatórios e comprovantes', ready: false },
   { slug: 'trello', name: 'Trello', text: 'Organizar tarefas e metas em quadros kanban', ready: false },
   { slug: 'googlemeet', name: 'Google Meet', text: 'Agendar reuniões e videochamadas', ready: false },
