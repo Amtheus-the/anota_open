@@ -4,6 +4,7 @@ import { query } from '../db.js'
 import { config } from '../config.js'
 import { sendWhatsApp } from '../services/whatsapp.js'
 import { sendChatMessage } from '../services/chatService.js'
+import { downloadWhatsAppAudio, transcribeAudio } from '../services/transcribe.js'
 import { hasAccess } from '../middleware/auth.js'
 import { normalizePhone, validPhone } from '../utils/validators.js'
 
@@ -74,8 +75,9 @@ async function handleIncoming(payload) {
     return
   }
 
-  if (!text) {
-    if (allowed(`media:${phone}`, 60_000)) await sendWhatsApp(phone, 'Por enquanto eu só entendo mensagens de texto 🦊 Me escreva a sua pergunta.')
+  const hasAudio = Boolean(payload.msgContent?.audioMessage)
+  if (!text && !hasAudio) {
+    if (allowed(`media:${phone}`, 60_000)) await sendWhatsApp(phone, 'Por enquanto eu entendo texto e áudio 🦊 Me escreva ou mande um áudio com a sua pergunta.')
     return
   }
   if (text.length > MAX_MESSAGE) {
@@ -92,13 +94,34 @@ async function handleIncoming(payload) {
     return
   }
 
+  let message = text
+  let heard = ''
+  if (hasAudio && !text) {
+    try {
+      const { buffer, mimetype } = await downloadWhatsAppAudio(payload)
+      heard = await transcribeAudio(buffer, mimetype)
+    } catch (err) {
+      console.error('[whatsapp] áudio:', err.message)
+      if (allowed(`audio:${phone}`, 30_000)) await sendWhatsApp(phone, err.status === 413 ? 'Esse áudio ficou longo demais 🦊 Mande um de até 3 minutos ou escreva.' : 'Não consegui ouvir esse áudio agora 🦊 Pode escrever ou mandar de novo?')
+      return
+    }
+    if (!heard) {
+      await sendWhatsApp(phone, 'Não entendi nada nesse áudio 🦊 Pode repetir ou escrever?')
+      return
+    }
+    message = heard.slice(0, MAX_MESSAGE)
+  }
+
   const [conversation] = await query('SELECT id FROM conversations WHERE user_id = ? AND title = ? ORDER BY id DESC LIMIT 1', [user.id, CONVERSATION_TITLE])
-  const result = await sendChatMessage(user.id, text, {
+  const result = await sendChatMessage(user.id, message, {
     conversationId: conversation?.id ?? null,
     channel: 'whatsapp',
     title: CONVERSATION_TITLE,
   })
-  await sendWhatsApp(phone, result.reply.length > MAX_REPLY ? `${result.reply.slice(0, MAX_REPLY - 1)}…` : result.reply)
+  const reply = heard ? `🎤 “${message.slice(0, 200)}”
+
+${result.reply}` : result.reply
+  await sendWhatsApp(phone, reply.length > MAX_REPLY ? `${reply.slice(0, MAX_REPLY - 1)}…` : reply)
 }
 
 // Webhook "mensagem recebida" da W-API. O segredo na URL impede que qualquer pessoa finja ser a W-API.
