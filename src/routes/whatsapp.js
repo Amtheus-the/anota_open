@@ -118,9 +118,7 @@ async function handleIncoming(payload) {
     channel: 'whatsapp',
     title: CONVERSATION_TITLE,
   })
-  const reply = heard ? `🎤 “${message.slice(0, 200)}”
-
-${result.reply}` : result.reply
+  const reply = result.reply
   await sendWhatsApp(phone, reply.length > MAX_REPLY ? `${reply.slice(0, MAX_REPLY - 1)}…` : reply)
 }
 
