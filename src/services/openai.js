@@ -68,6 +68,7 @@ NOTION: use search_notion para achar páginas (ele só vê o que o usuário libe
 Para criar, o Notion exige a página onde ela ficará: se o usuário não disse onde, chame search_notion e PERGUNTE qual das páginas usar (ou, se só houver uma opção clara, diga qual vai usar). Escreva o markdown completo (títulos, listas, tarefas, valores reais dos dados dele).
 Se o pedido já traz o título e o lugar (ex.: "crie 'Meta de teste' dentro de Anderson Matheus, com um plano mês a mês"), CRIE DIRETO em vez de perguntar: faça suposições razoáveis (valores e prazos a partir dos dados financeiros dele que já estão acima), escreva o plano completo e, depois de criar, diga em 1 frase o que supôs e que ele pode pedir ajuste. Só pergunte se faltar o LOCAL da página.
 Para montar o conteúdo de uma página, use os números dos dados financeiros que você já recebeu: NÃO chame as ferramentas show_* (blocos visuais) a menos que o usuário peça para ver os dados.
+Nunca escreva "vou criar" ou "aguarde um instante" e termine a resposta: se for criar, chame a ferramenta AGORA, na mesma resposta, e só depois escreva o resultado.
 Nunca apague nem reescreva páginas. Só diga que criou ou atualizou DEPOIS de a ferramenta responder ok.
 Descreva exatamente o que o bloco mostra: não omita itens nem troque valores. Se a ferramenta voltar sem resultado, aí sim diga que não encontrou.`
 
@@ -314,7 +315,8 @@ em linhas curtas. Não tem botão Desfazer: para apagar, liste os compromissos d
 Se a agenda não estiver conectada, diga que a conexão é feita no site, em Minha conta, Apps, e peça para ele voltar depois.`
 
 // Trava contra confirmação inventada: a IA às vezes escreve "lembrete criado" sem ter chamado a ferramenta
-const CLAIMS_CALENDAR_WRITE = /((criei|agendei|marquei|apaguei|removi|cancelei|exclu[ií])(?![a-zà-úç])|lembrete (agendado|criado)|evento (criado|agendado)|foi (removido|apagado|criado|agendado|marcado|exclu[ií]do)|já (foi|está) (removido|apagado|agendado|marcado))/i
+// também pega a promessa sem ação: "vou criar", "aguarde um instante enquanto crio"
+const CLAIMS_CALENDAR_WRITE = /((vou|já vou|irei) (criar|montar|agendar|marcar|apagar|adicionar|acrescentar|registrar)|aguarde[^.]{0,40}(crio|monto|agendo|marco|acrescento|apago)|enquanto (crio|monto|agendo|marco|acrescento)|(criei|agendei|marquei|apaguei|removi|cancelei|exclu[ií])(?![a-zà-úç])|lembrete (agendado|criado)|evento (criado|agendado)|foi (removido|apagado|criado|agendado|marcado|exclu[ií]do)|já (foi|está) (removido|apagado|agendado|marcado))/i
 const MENTIONS_CALENDAR = /(lembrete|evento|agenda|reunião|reuniao|compromisso|notion|página|pagina)/i
 
 // Fora do modo Computer a IA não tem as ferramentas de apps: precisa dizer isso, em vez de tentar ou fingir
@@ -381,7 +383,7 @@ ${financialContext}` })
         // disse que mexeu na agenda sem chamar a ferramenta: manda corrigir antes de o usuário acreditar
         nudged = true
         messages.push(message)
-        messages.push({ role: 'system', content: 'ATENÇÃO: você escreveu que criou, agendou ou apagou algo na agenda, mas NÃO chamou a ferramenta. Chame create_calendar_event ou delete_calendar_event agora (para apagar, liste os eventos antes e use o id certo). Se não for possível, diga com clareza que NÃO foi feito.' })
+        messages.push({ role: 'system', content: 'ATENÇÃO: você escreveu que criou, agendou, apagou ou VAI fazer algo (agenda ou Notion), mas NÃO chamou a ferramenta. Chame agora a ferramenta certa (create_calendar_event, delete_calendar_event, create_notion_page ou append_notion_page; para apagar, liste antes e use o id certo). Se não for possível, diga com clareza que NÃO foi feito. Não responda de novo com promessa.' })
         continue
       }
       return { reply, widgets, steps, agents, corrections }
