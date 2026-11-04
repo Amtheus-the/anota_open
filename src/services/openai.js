@@ -317,6 +317,9 @@ Se a agenda não estiver conectada, diga que a conexão é feita no site, em Min
 // Trava contra confirmação inventada: a IA às vezes escreve "lembrete criado" sem ter chamado a ferramenta
 // também pega a promessa sem ação: "vou criar", "aguarde um instante enquanto crio"
 const CLAIMS_CALENDAR_WRITE = /((vou|já vou|irei) (criar|montar|agendar|marcar|apagar|adicionar|acrescentar|registrar)|aguarde[^.]{0,40}(crio|monto|agendo|marco|acrescento|apago)|enquanto (crio|monto|agendo|marco|acrescento)|(criei|agendei|marquei|apaguei|removi|cancelei|exclu[ií])(?![a-zà-úç])|lembrete (agendado|criado)|evento (criado|agendado)|foi (removido|apagado|criado|agendado|marcado|exclu[ií]do)|já (foi|está) (removido|apagado|agendado|marcado))/i
+// promessa sem ação ("vou criar", "aguarde enquanto crio"): aqui a ferramenta é FORÇADA, porque só pedir de novo o modelo ignora
+const PROMISES_WRITE = /((vou|já vou|irei) (criar|montar|agendar|marcar|adicionar|acrescentar|registrar)|aguarde[^.]{0,40}(crio|monto|agendo|marco|acrescento)|enquanto (crio|monto|agendo|marco|acrescento))/i
+const ASKS_WRITE = /(cri[ae]|marqu|agend|lembr|acrescent|adicion|anot|mont[ae]|fa[çc]a)/i
 const MENTIONS_CALENDAR = /(lembrete|evento|agenda|reunião|reuniao|compromisso|notion|página|pagina)/i
 
 // Fora do modo Computer a IA não tem as ferramentas de apps: precisa dizer isso, em vez de tentar ou fingir
@@ -353,9 +356,12 @@ ${financialContext}` })
   const maxRounds = calendarOn ? 7 : 3
   let mailWidget = null
   let calendarWrote = false // criou ou apagou de verdade nesta resposta
-  let nudged = false
+  let nudges = 0
+  let forced = null // ferramenta que a próxima volta é obrigada a chamar
 
   for (let round = 0; round < maxRounds; round++) {
+    const forceNow = forced
+    forced = null
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.openai.apiKey}` },
@@ -364,7 +370,7 @@ ${financialContext}` })
         messages,
         temperature: 0.4,
         // na última volta a IA já tem os blocos e só precisa escrever
-        ...(round < maxRounds - 1 ? { tools: [...(fin.accounts.length > 0 ? [...openAiTools, setCategoryTool] : []), createAgentTool, ...(gmailOn ? [...gmailTools, ...notionTools] : []), ...(calendarOn ? calendarTools : [])] } : {}),
+        ...(round < maxRounds - 1 ? { tools: [...(fin.accounts.length > 0 ? [...openAiTools, setCategoryTool] : []), createAgentTool, ...(gmailOn ? [...gmailTools, ...notionTools] : []), ...(calendarOn ? calendarTools : [])], ...(forceNow ? { tool_choice: { type: 'function', function: { name: forceNow } } } : {}) } : {}),
       }),
       signal: AbortSignal.timeout(45_000),
     })
@@ -379,9 +385,15 @@ ${financialContext}` })
     if (calls.length === 0) {
       const reply = message?.content?.trim()
       if (!reply) throw new HttpError(502, 'Resposta vazia do assistente')
-      if (calendarOn && !calendarWrote && !nudged && agents.length === 0 && CLAIMS_CALENDAR_WRITE.test(reply) && MENTIONS_CALENDAR.test(reply)) {
+      if (calendarOn && !calendarWrote && nudges < 2 && agents.length === 0 && CLAIMS_CALENDAR_WRITE.test(reply) && MENTIONS_CALENDAR.test(reply)) {
         // disse que mexeu na agenda sem chamar a ferramenta: manda corrigir antes de o usuário acreditar
-        nudged = true
+        nudges += 1
+        const lastUser = String(history[history.length - 1]?.content ?? '')
+        if (PROMISES_WRITE.test(reply) && ASKS_WRITE.test(lastUser) && !/apag|cancel|remov/i.test(lastUser)) {
+          const notion = /notion|página|pagina/i.test(lastUser)
+          if (notion && gmailOn) forced = /acrescent|adicion/i.test(lastUser) ? 'append_notion_page' : 'create_notion_page'
+          else if (!notion) forced = 'create_calendar_event'
+        }
         messages.push(message)
         messages.push({ role: 'system', content: 'ATENÇÃO: você escreveu que criou, agendou, apagou ou VAI fazer algo (agenda ou Notion), mas NÃO chamou a ferramenta. Chame agora a ferramenta certa (create_calendar_event, delete_calendar_event, create_notion_page ou append_notion_page; para apagar, liste antes e use o id certo). Se não for possível, diga com clareza que NÃO foi feito. Não responda de novo com promessa.' })
         continue
