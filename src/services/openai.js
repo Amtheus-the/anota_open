@@ -3,7 +3,7 @@ import { HttpError } from '../utils/validators.js'
 import { openAiTools, runTool } from './widgets.js'
 import { CATEGORY_NAMES, previewCorrection } from './categoryRules.js'
 import { composioConfigured } from './composio.js'
-import { appendNotionPage, calendarEvents, createCalendarEvent, createNotionPage, createTrelloCard, deleteCalendarEvent, moveTrelloCard, readGmailMessage, readNotionPage, searchGmail, searchNotion, trelloOverview } from './apps.js'
+import { appendNotionPage, calendarEvents, createCalendarEvent, createNotionPage, calendlyEvents, calendlyLinks, createTrelloCard, deleteCalendarEvent, moveTrelloCard, readGmailMessage, readNotionPage, searchGmail, searchNotion, trelloOverview } from './apps.js'
 
 const SYSTEM_PROMPT = `Você é o Anota Grana, um assistente de finanças pessoais em português do Brasil.
 Ajude o usuário a entender gastos, organizar o orçamento e tomar decisões com clareza.
@@ -62,6 +62,7 @@ AGENDA (Google Calendar): para ver compromissos use list_calendar_events (consul
 crie DIRETO, é só na agenda dele e dá para desfazer; NUNCA coloque convidados nem mande e-mail de convite. Use datas e horas de Brasília, calcule "amanhã" e dias da semana a partir do "Agora" informado, e confirme em 1 frase com dia, hora e o que foi gravado.
 Quando o lembrete for de uma conta, busque o valor e o vencimento reais nos dados do banco ou nos e-mails antes de criar, e ponha-os no título e na descrição. Para apagar, use delete_calendar_event com o id do evento.
 Se a ferramenta devolver needs_connection, o usuário vê o cartão para autorizar: explique em 1 frase e não repita a chamada.
+CALENDLY: list_calendly_events mostra as reuniões que outras pessoas marcaram com o usuário pelo link dele (quem marcou e quando); list_calendly_links mostra os links de agendamento (cite o endereço completo). Se o usuário perguntar de reuniões marcadas com ele (clientes, atendimentos) ou falar em Calendly, consulte também list_calendly_events. Você NÃO cancela nem cria agendamentos do Calendly: diga que isso ele faz no próprio Calendly.
 OUTLOOK (Microsoft): as mesmas ferramentas de e-mail e agenda funcionam com o Outlook. Se o usuário falar em Outlook, Hotmail, Microsoft ou Teams, passe provider="outlook"; se falar em Gmail ou Google, provider="google"; senão deixe vazio (vale o que ele conectou). Reunião online no Outlook gera link do Microsoft Teams (meet=true). No Outlook os avisos seguem o padrão da agenda.
 GOOGLE MEET: se o usuário pedir reunião online, videochamada ou Meet, chame create_calendar_event com meet=true e passe o link devolvido (meetLink) na resposta. Se meetLink vier vazio, diga que o evento foi criado mas o Google não gerou o link. Você NÃO convida outras pessoas: diga que ele pode copiar o link e enviar a quem quiser.
 NUNCA confirme que existe um compromisso (nem repita horário ou link) com base na conversa: antes, sempre consulte list_calendar_events.
@@ -255,6 +256,34 @@ const notionTools = [
   },
 ]
 
+// Calendly (via Composio): só consulta. Não cancela nem cria agendamentos.
+const calendlyTools = [
+  {
+    type: 'function',
+    function: {
+      name: 'list_calendly_events',
+      description: 'Lista as reuniões que outras pessoas marcaram com o usuário pelo Calendly entre duas datas (inclusive), com o nome de quem marcou.',
+      parameters: {
+        type: 'object',
+        properties: {
+          from: { type: 'string', description: 'Primeiro dia, AAAA-MM-DD' },
+          to: { type: 'string', description: 'Último dia (inclusive), AAAA-MM-DD' },
+          reason: reasonParam,
+        },
+        required: ['from', 'to', 'reason'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_calendly_links',
+      description: 'Lista os links de agendamento do usuário no Calendly (tipos de reunião), com a duração e o endereço para mandar a quem quiser marcar.',
+      parameters: { type: 'object', properties: { reason: reasonParam }, required: ['reason'] },
+    },
+  },
+]
+
 // Trello (via Composio): ver quadros, criar e mover cartões. Nunca apaga nem arquiva.
 const trelloTools = [
   {
@@ -430,7 +459,7 @@ ${financialContext}` })
         messages,
         temperature: 0.4,
         // na última volta a IA já tem os blocos e só precisa escrever
-        ...(round < maxRounds - 1 ? { tools: [...(fin.accounts.length > 0 ? [...openAiTools, setCategoryTool] : []), createAgentTool, ...(gmailOn ? [...gmailTools, ...notionTools, ...trelloTools] : []), ...(calendarOn ? calendarTools : [])], ...(forceNow ? { tool_choice: { type: 'function', function: { name: forceNow } } } : {}) } : {}),
+        ...(round < maxRounds - 1 ? { tools: [...(fin.accounts.length > 0 ? [...openAiTools, setCategoryTool] : []), createAgentTool, ...(gmailOn ? [...gmailTools, ...notionTools, ...trelloTools] : []), ...(calendarOn ? [...calendarTools, ...calendlyTools] : [])], ...(forceNow ? { tool_choice: { type: 'function', function: { name: forceNow } } } : {}) } : {}),
       }),
       signal: AbortSignal.timeout(45_000),
     })
@@ -582,6 +611,40 @@ ${financialContext}` })
         } else {
           calendarWrote = true
           messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, apagado: true }) })
+        }
+        continue
+      }
+      if (call.function.name === 'list_calendly_events' || call.function.name === 'list_calendly_links') {
+        let result
+        try {
+          if (call.function.name === 'list_calendly_events') {
+            listedCalendar = true
+            result = await calendlyEvents(userId, { from: args.from, to: args.to })
+          } else result = await calendlyLinks(userId)
+        } catch (err) {
+          console.error('[calendly]', err.message)
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: false, error: 'Não consegui acessar o Calendly agora' }) })
+          continue
+        }
+        if (result.needsConnection) {
+          if (channel === 'whatsapp') {
+            messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ needs_connection: true, observacao: 'O Calendly ainda não está conectado. A conexão só é feita no site: peça para abrir Minha conta, depois Apps, e conectar o Calendly.' }) })
+          } else {
+            if (!widgets.some((w) => w.type === 'connectApp' && w.app === 'calendly')) widgets.push({ type: 'connectApp', title: 'Conectar o Calendly', app: 'calendly', name: 'Calendly', reason: String(args.reason ?? 'para ver as reuniões marcadas com você').slice(0, 200) })
+            messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ needs_connection: true, observacao: 'O usuário vê agora um cartão para autorizar o Calendly. Depois que ele autorizar, ele pede de novo.' }) })
+          }
+          continue
+        }
+        if (result.error) {
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: false, error: result.error }) })
+          continue
+        }
+        if (result.events) {
+          widgets.push({ type: 'calendarEvents', title: 'Reuniões marcadas no Calendly', from: args.from, to: args.to, calendars: result.calendars, items: result.events, count: result.events.length })
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, reunioes: result.events.map((e) => ({ titulo: e.title, inicio: e.start, fim: e.end, quem_marcou: e.guests, local: e.location })), observacao: result.events.length === 0 ? 'Nenhuma reunião marcada pelo Calendly nesse período.' : undefined }) })
+        } else {
+          widgets.push({ type: 'calendlyLinks', title: 'Links de agendamento no Calendly', items: result.links })
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, links: result.links.map((l) => ({ nome: l.name, minutos: l.duration, endereco: l.url })), observacao: result.links.length === 0 ? 'Nenhum link de agendamento ativo.' : undefined }) })
         }
         continue
       }

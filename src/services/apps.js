@@ -7,6 +7,7 @@ export const APPS = [
   { slug: 'notion', name: 'Notion', text: 'Acompanhar metas financeiras', ready: true },
   { slug: 'googledrive', name: 'Google Drive', text: 'Salvar relatórios e comprovantes', ready: false },
   { slug: 'trello', name: 'Trello', text: 'Organizar tarefas e metas em quadros kanban', ready: true },
+  { slug: 'calendly', name: 'Calendly', text: 'Ver quem marcou reunião com você', ready: true },
   { slug: 'outlook', name: 'Outlook', text: 'E-mail e agenda da Microsoft', ready: true },
   { slug: 'googlemeet', name: 'Google Meet', text: 'Agendar reuniões e videochamadas', ready: true },
 ]
@@ -635,4 +636,73 @@ export async function createCalendarEvent(userId, opts = {}) {
 export async function deleteCalendarEvent(userId, eventId, calendarId = 'primary') {
   if (String(eventId).startsWith(OL)) return deleteOutlookEvent(userId, eventId)
   return deleteGoogleEvent(userId, eventId, calendarId)
+}
+
+// ---------- Calendly (reuniões que outras pessoas marcam pelo link do usuário; só consulta) ----------
+const calendlyUser = async (userId, connection) => {
+  const data = await executeTool(userId, 'CALENDLY_GET_USER', {}, connection.id)
+  const uri = JSON.stringify(data ?? '').match(/https:\/\/api\.calendly\.com\/users\/[A-Za-z0-9_-]+/)?.[0]
+  if (!uri) throw new Error('não achei o usuário do Calendly na resposta')
+  return uri
+}
+
+// horário em UTC (ISO com Z) -> horário de Brasília com offset
+const utcToLocal = (iso) => {
+  const t = new Date(iso)
+  return Number.isNaN(t.getTime()) ? '' : `${new Date(t.getTime() - 3 * 3_600_000).toISOString().slice(0, 19)}${OFFSET}`
+}
+
+export async function calendlyEvents(userId, { from, to } = {}) {
+  const connection = await connectionFor(userId, 'calendly')
+  if (!connection) return { needsConnection: true }
+  const day = /^\d{4}-\d{2}-\d{2}$/
+  if (!day.test(String(from)) || !day.test(String(to))) return { error: 'Informe as datas no formato AAAA-MM-DD' }
+  const user = await calendlyUser(userId, connection)
+  const data = await executeTool(
+    userId,
+    'CALENDLY_LIST_SCHEDULED_EVENTS',
+    {
+      user,
+      min_start_time: new Date(`${from}T00:00:00${OFFSET}`).toISOString(),
+      max_start_time: new Date(`${to}T23:59:59${OFFSET}`).toISOString(),
+      status: 'active',
+      sort: 'start_time:asc',
+      count: 50,
+    },
+    connection.id,
+  )
+  const events = firstArray(data).filter((e) => e.uri && e.start_time).slice(0, 40).map((e) => ({
+    id: String(e.uri).split('/').pop(),
+    calendarId: 'calendly',
+    calendar: 'Calendly',
+    title: e.name ?? 'Reunião',
+    start: utcToLocal(e.start_time),
+    end: utcToLocal(e.end_time),
+    allDay: false,
+    location: e.location?.join_url ?? e.location?.location ?? '',
+    guests: [],
+  }))
+  // quem marcou: busca os convidados dos primeiros eventos (falha de um não derruba os outros)
+  await Promise.allSettled(events.slice(0, 10).map(async (event) => {
+    const invitees = await executeTool(userId, 'CALENDLY_LIST_EVENT_INVITEES', { uuid: event.id, count: 5 }, connection.id)
+    event.guests = firstArray(invitees).map((i) => i.name ?? i.email).filter(Boolean).slice(0, 5)
+    if (event.guests.length) event.title = `${event.title} — ${event.guests.join(', ')}`
+  }))
+  console.log('[calendly] listou', from, 'a', to, '| eventos:', events.length)
+  return { events, calendars: ['Calendly'], failed: 0 }
+}
+
+export async function calendlyLinks(userId) {
+  const connection = await connectionFor(userId, 'calendly')
+  if (!connection) return { needsConnection: true }
+  const user = await calendlyUser(userId, connection)
+  const data = await executeTool(userId, 'CALENDLY_LIST_EVENT_TYPES', { user, active: true, count: 50 }, connection.id)
+  const links = firstArray(data).filter((t) => t.scheduling_url).slice(0, 30).map((t) => ({
+    id: String(t.uri ?? t.scheduling_url).split('/').pop(),
+    name: t.name ?? 'Reunião',
+    duration: t.duration ?? null,
+    url: t.scheduling_url,
+  }))
+  console.log('[calendly] links:', links.length)
+  return { links }
 }
