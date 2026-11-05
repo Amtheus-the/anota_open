@@ -3,6 +3,8 @@ import { loadFinancials, refreshFinancials } from './financial.js'
 import { sendWhatsApp, whatsappConfigured } from './whatsapp.js'
 import { RULES, scheduledMinutes } from './agentAlerts.js'
 import { brazilDay } from './dailySummary.js'
+import { calendarEvents, calendlyEvents } from './apps.js'
+import { composioConfigured } from './composio.js'
 
 const TICK_MS = 5 * 60 * 1000
 const GRACE_HOURS = 3 // se o servidor estava fora no horário, ainda avisa até 3h depois
@@ -21,6 +23,36 @@ function brNow() {
   }
 }
 
+// Pauta: mensagem da manhã com os compromissos do dia (agendas Google/Outlook + Calendly). Devolve null se não há agenda conectada.
+export async function agendaMessage(userId, today) {
+  if (!composioConfigured()) return null
+  const [cal, cly] = (await Promise.allSettled([
+    calendarEvents(userId, { from: today, to: today }),
+    calendlyEvents(userId, { from: today, to: today }),
+  ])).map((r) => (r.status === 'fulfilled' ? r.value : { failed: true }))
+  const usable = (r) => r && !r.failed && !r.needsConnection && !r.error
+  if (!usable(cal) && !usable(cly)) {
+    // nada conectado: não manda nada. Se estava conectado e deu erro agora, tenta de novo no próximo ciclo
+    if (cal.failed || cly.failed) throw new Error('não consegui ler a agenda')
+    return null
+  }
+
+  // o Calendly também grava na agenda: um evento no mesmo minuto é o mesmo (fica o do Calendly, que traz quem marcou)
+  const fromCalendly = usable(cly) ? cly.events : []
+  const taken = new Set(fromCalendly.map((e) => String(e.start).slice(0, 16)))
+  const others = usable(cal) ? cal.events.filter((e) => e.allDay || !taken.has(String(e.start).slice(0, 16))) : []
+  const events = [...others, ...fromCalendly].sort((a, b) => (a.start < b.start ? -1 : 1))
+
+  const label = new Date(`${today}T12:00:00-03:00`).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', timeZone: TIMEZONE })
+  const lines = events.slice(0, 15).map((e) => `• ${e.allDay ? 'Dia todo' : String(e.start).slice(11, 16)} – ${e.title}${e.location ? `\n   ${e.location}` : ''}`)
+  const warn = [!usable(cal) && 'a agenda', !usable(cly) && 'o Calendly'].filter(Boolean)
+  const note = warn.length > 0 && (cal.failed || cly.failed) ? `\n\n(Não consegui ler ${warn.join(' e ')} agora.)` : ''
+  const body = events.length === 0
+    ? 'Bom dia! Você não tem nenhum compromisso na agenda hoje 🦊'
+    : `Bom dia! Você tem ${events.length} ${events.length === 1 ? 'compromisso' : 'compromissos'} hoje:\n\n${lines.join('\n')}${events.length > 15 ? `\n… e mais ${events.length - 15}` : ''}`
+  return `*Anota Grana · Pauta de ${label}*\n\n${body}${note}`
+}
+
 async function processUser(userId, phone, agents, today, minutes) {
   let fin = null
   if (agents.some((a) => RULES[a.agentKey].needsData)) {
@@ -32,7 +64,7 @@ async function processUser(userId, phone, agents, today, minutes) {
 
   const sections = []
   const sentKeys = [] // [agentId, key] confirmados só depois do envio
-  const alertAgents = agents.filter((a) => !RULES[a.agentKey].summary)
+  const alertAgents = agents.filter((a) => !RULES[a.agentKey].summary && !RULES[a.agentKey].agenda)
   for (const agent of alertAgents) {
     const rule = RULES[agent.agentKey]
     if (rule.needsData && !data) continue
@@ -72,11 +104,21 @@ async function processUser(userId, phone, agents, today, minutes) {
       console.log(`[luno] usuário ${userId} dados de ${data.syncedAt ?? 'sem data'} | hoje: ${todays.length} transações | último fechamento: ${summaryAgent.lastRunAt ? new Date(summaryAgent.lastRunAt).toISOString() : 'nenhum'}`)
     }
   }
+  // a Pauta vai em mensagem própria; se falhar, o erro sobe e o ciclo seguinte tenta de novo
+  let agendaSent = false
+  const agendaAgent = agents.find((a) => RULES[a.agentKey].agenda)
+  if (agendaAgent) {
+    const text = await agendaMessage(userId, today)
+    if (text) {
+      await sendWhatsApp(phone, text)
+      agendaSent = true
+    }
+  }
   for (const agent of agents) {
     if (waiting && agent === summaryAgent) continue
     await query('UPDATE user_agents SET last_run_date = ? WHERE id = ?', [today, agent.id])
   }
-  return sections.length > 0 || summarySent
+  return sections.length > 0 || summarySent || agendaSent
 }
 
 // Roda os agentes ativos cujo horário chegou e que ainda não rodaram hoje

@@ -7,6 +7,7 @@ export const CATALOG = {
   teto: { name: 'Teto', text: 'Alerta quando os gastos ultrapassam os limites definidos' },
   faisca: { name: 'Faísca', text: 'Cria missões financeiras inesperadas' },
   juizo: { name: 'Juízo', text: 'Chama a atenção para gastos exagerados ou incompatíveis com o orçamento' },
+  pauta: { name: 'Pauta', text: 'Envia de manhã o resumo dos compromissos do dia (agenda e Calendly)', defaultSchedule: 'Todo dia às 7h' },
   luno: { name: 'Luno', text: 'Envia no fim do dia um resumo dos gastos, entradas e movimentações financeiras', defaultSchedule: 'Todo dia às 21h' },
 }
 

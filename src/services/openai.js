@@ -41,13 +41,13 @@ CORREÇÃO DE CATEGORIAS (agente Prisma): quando o usuário disser que uma compr
 Alimentação", "esse Pix para a Maria não é gasto"), chame set_category com o nome como aparece no extrato e uma categoria da lista. Se não ficar
 claro qual estabelecimento, pergunte antes. Depois confirme em uma frase o que mudou (estabelecimento, categoria e quantas transações) e diga que
 vale para as próximas também. Os valores que você já mostrou nesta conversa não mudam sozinhos: avise que a nova categoria aparece nas próximas consultas.
-AGENTES: o app tem 6 agentes que o usuário pode ativar: Luno (o agente do fechamento diário: manda por WhatsApp, no fim do dia, um resumo dos gastos, entradas e saldo), Faro (cobranças suspeitas e duplicadas), Prisma (corrige categorias e
+AGENTES: o app tem 7 agentes que o usuário pode ativar: Pauta (o agente da agenda: manda por WhatsApp, de manhã, o resumo dos compromissos do dia, da agenda e do Calendly), Luno (o agente do fechamento diário: manda por WhatsApp, no fim do dia, um resumo dos gastos, entradas e saldo), Faro (cobranças suspeitas e duplicadas), Prisma (corrige categorias e
 aprende com o usuário), Teto (alerta quando os gastos passam do limite definido), Faísca (missões financeiras inesperadas) e
 Juízo (chama a atenção para gastos exagerados, sincero e irônico sem humilhar). Quando o usuário pedir "Crie o X ..." NÃO crie
 ainda: primeiro faça UMA pergunta curta com o que falta (Teto: qual limite de gasto por mês; Faro, Prisma, Faísca e Juízo: em que
-horário quer receber o aviso; Luno: em que horário quer o fechamento do dia, padrão 21h, depois que o banco atualiza os dados do dia; se preferir, pode usar o padrão) e diga que o
+horário quer receber o aviso; Pauta: em que horário quer o resumo da manhã, padrão 7h; Luno: em que horário quer o fechamento do dia, padrão 21h, depois que o banco atualiza os dados do dia; se preferir, pode usar o padrão) e diga que o
 agente avisa por WhatsApp, no número do cadastro, e que dá para parar a qualquer hora respondendo PARAR. Só DEPOIS que o usuário responder, chame create_agent e confirme em 2 ou 3 frases o que o agente
-vai fazer e quando (padrão 9h, ou 21h no Luno, se ele não disse horário, e avise que pode ajustar). Nunca chame create_agent antes de o usuário
+vai fazer e quando (padrão 9h, 7h na Pauta ou 21h no Luno, se ele não disse horário, e avise que pode ajustar). Nunca chame create_agent antes de o usuário
 responder à sua pergunta. Se ele disser que não quer mais o agente, apenas confirme que não criou nada.
 GMAIL: quando o usuário pedir algo que está nos e-mails dele (boletos, faturas, assinaturas, recibos, vencimentos, cobranças recusadas), use search_gmail.
 Pesquise a caixa de entrada com cuidado e por inteiro: use SEMPRE "queries" com várias buscas diferentes de uma vez, nunca uma palavra só.
@@ -81,7 +81,7 @@ Nunca apague nem reescreva páginas. Só diga que criou ou atualizou DEPOIS de a
 Descreva exatamente o que o bloco mostra: não omita itens nem troque valores. Se a ferramenta voltar sem resultado, aí sim diga que não encontrou.`
 
 // Agentes que o chat pode criar (o front guarda a lista; aqui só validamos qual foi escolhido)
-const AGENT_KEYS = ['faro', 'prisma', 'teto', 'faisca', 'juizo', 'luno']
+const AGENT_KEYS = ['faro', 'prisma', 'teto', 'faisca', 'juizo', 'luno', 'pauta']
 const createAgentTool = {
   type: 'function',
   function: {
@@ -90,7 +90,7 @@ const createAgentTool = {
     parameters: {
       type: 'object',
       properties: {
-        agent: { type: 'string', enum: AGENT_KEYS, description: 'faro, prisma, teto, faisca, juizo ou luno' },
+        agent: { type: 'string', enum: AGENT_KEYS, description: 'faro, prisma, teto, faisca, juizo, luno ou pauta' },
         schedule: { type: 'string', description: 'Quando o agente avisa, em texto curto (ex.: "Todo dia às 9h"). Padrão: Todo dia às 9h' },
         limit: { type: 'number', description: 'Só para o Teto: limite de gastos por mês em reais' },
       },
