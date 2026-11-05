@@ -1,4 +1,4 @@
-import { connectionFor, executeTool } from './composio.js'
+import { connectionFor, executeTool, listConnections } from './composio.js'
 
 // Apps do catálogo. "ready" = o chat já sabe usar; os outros ainda não têm ferramentas e aparecem como "Em breve".
 export const APPS = [
@@ -7,6 +7,7 @@ export const APPS = [
   { slug: 'notion', name: 'Notion', text: 'Acompanhar metas financeiras', ready: true },
   { slug: 'googledrive', name: 'Google Drive', text: 'Salvar relatórios e comprovantes', ready: false },
   { slug: 'trello', name: 'Trello', text: 'Organizar tarefas e metas em quadros kanban', ready: true },
+  { slug: 'outlook', name: 'Outlook', text: 'E-mail e agenda da Microsoft', ready: true },
   { slug: 'googlemeet', name: 'Google Meet', text: 'Agendar reuniões e videochamadas', ready: true },
 ]
 
@@ -34,7 +35,7 @@ const MAX_EMAILS = 40
 
 // Busca na caixa de entrada (sintaxe de busca do Gmail). Aceita várias buscas de uma vez ("queries"): elas rodam juntas e os
 // resultados são somados sem repetir e-mail, para a IA não depender de uma única palavra. Devolve { needsConnection } se o Gmail não estiver conectado.
-export async function searchGmail(userId, { query, queries, maxResults, pageToken } = {}) {
+async function searchGoogleMail(userId, { query, queries, maxResults, pageToken } = {}) {
   const connection = await connectionFor(userId, 'gmail')
   if (!connection) return { needsConnection: true }
 
@@ -71,7 +72,7 @@ export async function searchGmail(userId, { query, queries, maxResults, pageToke
   }
 }
 
-export async function readGmailMessage(userId, messageId) {
+async function readGoogleMessage(userId, messageId) {
   const connection = await connectionFor(userId, 'gmail')
   if (!connection) return { needsConnection: true }
   const data = await executeTool(userId, 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID', { message_id: String(messageId), format: 'full', user_id: 'me' }, connection.id)
@@ -100,7 +101,7 @@ function normalizeEvent(e, calendar) {
 }
 
 // Eventos de TODAS as agendas do usuário entre duas datas (YYYY-MM-DD, "to" inclusive), em ordem de início
-export async function calendarEvents(userId, { from, to } = {}) {
+async function googleCalendarEvents(userId, { from, to } = {}) {
   const connection = await connectionFor(userId, 'googlecalendar')
   if (!connection) return { needsConnection: true }
   const day = /^\d{4}-\d{2}-\d{2}$/
@@ -133,7 +134,7 @@ const clean = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().sl
 
 // Cria um evento na agenda principal, só do usuário (sem convidados e sem e-mail de convite).
 // start: AAAA-MM-DDTHH:MM no horário de Brasília. reminders: minutos antes do início (aviso na tela).
-export async function createCalendarEvent(userId, { title, start, durationMinutes, description, reminders, meet } = {}) {
+async function createGoogleEvent(userId, { title, start, durationMinutes, description, reminders, meet } = {}) {
   const connection = await connectionFor(userId, 'googlecalendar')
   if (!connection) return { needsConnection: true }
   const when = String(start ?? '').match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/)
@@ -187,7 +188,7 @@ export async function createCalendarEvent(userId, { title, start, durationMinute
   }
 }
 
-export async function deleteCalendarEvent(userId, eventId, calendarId = 'primary') {
+async function deleteGoogleEvent(userId, eventId, calendarId = 'primary') {
   const connection = await connectionFor(userId, 'googlecalendar')
   if (!connection) return { needsConnection: true }
   await executeTool(userId, 'GOOGLECALENDAR_DELETE_EVENT', { event_id: String(eventId), calendar_id: String(calendarId || 'primary'), send_updates: 'none' }, connection.id)
@@ -412,4 +413,226 @@ export async function moveTrelloCard(userId, { board, card, toList } = {}) {
 
   await executeTool(userId, 'TRELLO_UPDATE_CARDS_BY_ID_CARD', { idCard: pickedCard.item.id, idList: target.item.id }, connection.id)
   return { card: { id: pickedCard.item.id, name: pickedCard.item.name, board: pickedBoard.item.name, list: target.item.name, from: pickedCard.item.listName, url: pickedCard.item.url, action: 'moved' } }
+}
+
+// ---------- Outlook (Microsoft: e-mail e agenda) ----------
+// As ferramentas do chat são as mesmas do Google; o roteador abaixo escolhe Google ou Microsoft conforme o que o usuário conectou.
+const OL = 'ol:' // prefixo dos ids do Outlook, para saber de onde cada e-mail ou evento veio
+
+const firstArray = (d, depth = 0) => {
+  if (Array.isArray(d)) return d
+  if (!d || typeof d !== 'object' || depth > 3) return []
+  for (const v of Object.values(d)) {
+    const found = firstArray(v, depth + 1)
+    if (found.length) return found
+  }
+  return []
+}
+
+const addressOf = (p) => {
+  const a = p?.emailAddress ?? p
+  if (!a || typeof a !== 'object') return typeof a === 'string' ? a : ''
+  return a.name && a.address ? `${a.name} <${a.address}>` : a.address ?? a.name ?? ''
+}
+
+function normalizeOutlookMail(m, limit) {
+  const html = m.body?.content ?? ''
+  const text = stripHtml(m.bodyPreview && !html ? m.bodyPreview : html || m.bodyPreview || '')
+  return {
+    id: m.id ? OL + m.id : undefined,
+    from: addressOf(m.from ?? m.sender),
+    subject: m.subject ?? '',
+    date: m.receivedDateTime ?? m.sentDateTime ?? '',
+    text: text.slice(0, limit),
+    attachments: m.hasAttachments ? ['(tem anexo)'] : [],
+  }
+}
+
+// converte a busca no estilo Gmail (after:, before:, newer_than:, has:attachment) para a busca do Outlook (KQL)
+function toKql(query) {
+  const day = (n) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10)
+  return String(query ?? '')
+    .replace(/\bafter:(\d{4})[\/-](\d{2})[\/-](\d{2})/gi, 'received>=$1-$2-$3')
+    .replace(/\bbefore:(\d{4})[\/-](\d{2})[\/-](\d{2})/gi, 'received<=$1-$2-$3')
+    .replace(/\bnewer_than:(\d+)d/gi, (_, n) => `received>=${day(Number(n))}`)
+    .replace(/\bnewer_than:(\d+)m/gi, (_, n) => `received>=${day(Number(n) * 30)}`)
+    .replace(/\bhas:attachment/gi, 'hasattachments:true')
+    .replace(/\bin:\w+/gi, '')
+    .trim()
+}
+
+async function searchOutlookMail(userId, { query, queries, maxResults } = {}) {
+  const connection = await connectionFor(userId, 'outlook')
+  if (!connection) return { needsConnection: 'outlook' }
+  const searches = [...new Set([...(Array.isArray(queries) ? queries : []), query].map((q) => toKql(q).slice(0, 300)).filter(Boolean))].slice(0, MAX_QUERIES)
+  if (searches.length === 0) searches.push('')
+  const top = clamp(maxResults, 1, 25, searches.length > 1 ? 10 : 15)
+
+  const settled = await Promise.allSettled(
+    searches.map((q) => executeTool(userId, 'OUTLOOK_LIST_MESSAGES', { folder: 'allfolders', top, ...(q ? { search: q } : {}) }, connection.id)),
+  )
+  const answered = settled.filter((r) => r.status === 'fulfilled')
+  if (answered.length === 0) throw settled[0].reason
+
+  const seen = new Set()
+  const emails = []
+  for (const { value } of answered) {
+    for (const message of firstArray(value)) {
+      const email = normalizeOutlookMail(message, searches.length > 1 ? 500 : 700)
+      if (!email.id || seen.has(email.id)) continue
+      seen.add(email.id)
+      emails.push(email)
+    }
+  }
+  console.log('[outlook] busca:', JSON.stringify(searches), '| e-mails:', emails.length)
+  if (emails.length === 0) console.log('[outlook] sem e-mails; resposta:', JSON.stringify(answered[0].value)?.slice(0, 300))
+  return { emails: emails.slice(0, MAX_EMAILS), nextPageToken: null, total: null, searches: searches.length }
+}
+
+async function readOutlookMessage(userId, messageId) {
+  const connection = await connectionFor(userId, 'outlook')
+  if (!connection) return { needsConnection: 'outlook' }
+  const id = String(messageId).replace(new RegExp('^' + OL), '')
+  const data = await executeTool(userId, 'OUTLOOK_GET_MESSAGE', { message_id: id }, connection.id)
+  return { email: normalizeOutlookMail(data?.response_data ?? data?.message ?? data ?? {}, 4000) }
+}
+
+// horário do Outlook: se vier em UTC, passa para Brasília; devolve AAAA-MM-DDTHH:MM:SS-03:00
+function olTime(t) {
+  const v = t?.dateTime ?? (typeof t === 'string' ? t : '')
+  if (!v) return ''
+  const zone = String(t?.timeZone ?? '')
+  if (/^utc$/i.test(zone) || /z$/i.test(v)) {
+    const local = new Date(new Date(v.replace(/z$/i, '').slice(0, 19) + 'Z').getTime() - 3 * 3_600_000)
+    return `${local.toISOString().slice(0, 19)}${OFFSET}`
+  }
+  return `${v.slice(0, 19)}${OFFSET}`
+}
+
+async function outlookEvents(userId, { from, to }) {
+  const connection = await connectionFor(userId, 'outlook')
+  if (!connection) return { needsConnection: 'outlook' }
+  const data = await executeTool(
+    userId,
+    'OUTLOOK_GET_CALENDAR_VIEW',
+    { start_datetime: `${from}T00:00:00${OFFSET}`, end_datetime: `${to}T23:59:59${OFFSET}`, timezone: TZ, top: 50 },
+    connection.id,
+  )
+  const events = firstArray(data)
+    .filter((e) => e.id && !e.isCancelled)
+    .map((e) => ({
+      id: OL + e.id,
+      calendarId: 'outlook',
+      calendar: 'Outlook',
+      title: e.subject ?? '(sem título)',
+      start: olTime(e.start),
+      end: olTime(e.end),
+      allDay: Boolean(e.isAllDay),
+      location: typeof e.location === 'string' ? e.location : e.location?.displayName ?? '',
+      meetLink: e.onlineMeeting?.joinUrl ?? e.onlineMeetingUrl ?? null,
+    }))
+  console.log('[outlook] listou', from, 'a', to, '| eventos:', events.length)
+  return { events, calendars: ['Outlook'], failed: 0 }
+}
+
+async function createOutlookEvent(userId, { title, start, durationMinutes, description, meet }) {
+  const connection = await connectionFor(userId, 'outlook')
+  if (!connection) return { needsConnection: 'outlook' }
+  const when = String(start ?? '').match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/)
+  if (!when) return { error: 'Informe o início no formato AAAA-MM-DDTHH:MM' }
+  const minutes = clamp(durationMinutes, 5, 1440, 15)
+  const endLocal = new Date(new Date(`${when[1]}T${when[2]}:00Z`).getTime() + minutes * 60_000).toISOString().slice(0, 19)
+
+  const created = await executeTool(
+    userId,
+    'OUTLOOK_CALENDAR_CREATE_EVENT',
+    {
+      subject: clean(title, 200) || 'Lembrete',
+      start_datetime: `${when[1]}T${when[2]}:00`,
+      end_datetime: endLocal,
+      time_zone: TZ,
+      ...(description ? { body: clean(description, 1000) } : {}),
+      ...(meet ? { is_online_meeting: true, online_meeting_provider: 'teamsForBusiness' } : {}),
+    },
+    connection.id,
+  )
+  const event = created?.response_data ?? created?.event ?? created
+  const id = event?.id ?? event?.event_id
+  console.log('[outlook] evento criado; campos:', Object.keys(event ?? {}).join(','), '| reunião online pedida:', Boolean(meet))
+  if (!id) return { error: 'A agenda não confirmou a criação do evento' }
+  return {
+    event: {
+      id: OL + id,
+      calendarId: 'outlook',
+      title: clean(title, 200) || 'Lembrete',
+      start: `${when[1]}T${when[2]}:00${OFFSET}`,
+      end: new Date(new Date(`${when[1]}T${when[2]}:00${OFFSET}`).getTime() + minutes * 60_000).toISOString(),
+      link: event?.webLink ?? null,
+      meetLink: event?.onlineMeeting?.joinUrl ?? event?.onlineMeetingUrl ?? null,
+      meetRequested: Boolean(meet),
+      reminders: [],
+    },
+  }
+}
+
+async function deleteOutlookEvent(userId, eventId) {
+  const connection = await connectionFor(userId, 'outlook')
+  if (!connection) return { needsConnection: 'outlook' }
+  await executeTool(userId, 'OUTLOOK_DELETE_CALENDAR_EVENT', { event_id: String(eventId).replace(new RegExp('^' + OL), '') }, connection.id)
+  return { ok: true }
+}
+
+// ---------- Roteador Google x Microsoft ----------
+// provider: 'outlook' ou 'google' quando o usuário disse qual usar; sem isso vale o que estiver conectado (os dois: junta nas consultas e cria no Google)
+async function connected(userId) {
+  const apps = new Set((await listConnections(userId).catch(() => [])).map((c) => c.app))
+  return { gmail: apps.has('gmail'), calendar: apps.has('googlecalendar'), outlook: apps.has('outlook') }
+}
+const isOutlook = (p) => String(p ?? '').toLowerCase() === 'outlook'
+const isGoogle = (p) => String(p ?? '').toLowerCase() === 'google'
+
+export async function searchGmail(userId, opts = {}) {
+  const has = await connected(userId)
+  if (isOutlook(opts.provider) || (has.outlook && !has.gmail && !isGoogle(opts.provider))) return searchOutlookMail(userId, opts)
+  if (has.outlook && has.gmail && !isGoogle(opts.provider)) {
+    const [g, o] = await Promise.allSettled([searchGoogleMail(userId, opts), searchOutlookMail(userId, opts)])
+    if (g.status === 'rejected' && o.status === 'rejected') throw g.reason
+    const emails = [...(g.value?.emails ?? []), ...(o.value?.emails ?? [])]
+    return { emails: emails.slice(0, MAX_EMAILS), nextPageToken: null, total: null, searches: g.value?.searches ?? 1 }
+  }
+  return searchGoogleMail(userId, opts)
+}
+
+export async function readGmailMessage(userId, messageId, provider) {
+  if (String(messageId).startsWith(OL) || isOutlook(provider)) return readOutlookMessage(userId, messageId)
+  return readGoogleMessage(userId, messageId)
+}
+
+export async function calendarEvents(userId, opts = {}) {
+  const has = await connected(userId)
+  const day = /^\d{4}-\d{2}-\d{2}$/
+  if (!day.test(String(opts.from)) || !day.test(String(opts.to))) return { error: 'Informe as datas no formato AAAA-MM-DD' }
+  if (isOutlook(opts.provider) || (has.outlook && !has.calendar && !isGoogle(opts.provider))) return outlookEvents(userId, opts)
+  if (has.outlook && has.calendar && !isGoogle(opts.provider)) {
+    const [g, o] = await Promise.allSettled([googleCalendarEvents(userId, opts), outlookEvents(userId, opts)])
+    if (g.status === 'rejected' && o.status === 'rejected') throw g.reason
+    const events = [...(g.value?.events ?? []), ...(o.value?.events ?? [])].sort((a, b) => (a.start < b.start ? -1 : 1))
+    return {
+      events: events.slice(0, 60),
+      calendars: [...(g.value?.calendars ?? []), ...(o.value?.calendars ?? [])],
+      failed: (g.value?.failed ?? 0) + (g.status === 'rejected' ? 1 : 0) + (o.status === 'rejected' ? 1 : 0),
+    }
+  }
+  return googleCalendarEvents(userId, opts)
+}
+
+export async function createCalendarEvent(userId, opts = {}) {
+  const has = await connected(userId)
+  if (isOutlook(opts.provider) || (has.outlook && !has.calendar && !isGoogle(opts.provider))) return createOutlookEvent(userId, opts)
+  return createGoogleEvent(userId, opts)
+}
+
+export async function deleteCalendarEvent(userId, eventId, calendarId = 'primary') {
+  if (String(eventId).startsWith(OL)) return deleteOutlookEvent(userId, eventId)
+  return deleteGoogleEvent(userId, eventId, calendarId)
 }

@@ -62,6 +62,7 @@ AGENDA (Google Calendar): para ver compromissos use list_calendar_events (consul
 crie DIRETO, é só na agenda dele e dá para desfazer; NUNCA coloque convidados nem mande e-mail de convite. Use datas e horas de Brasília, calcule "amanhã" e dias da semana a partir do "Agora" informado, e confirme em 1 frase com dia, hora e o que foi gravado.
 Quando o lembrete for de uma conta, busque o valor e o vencimento reais nos dados do banco ou nos e-mails antes de criar, e ponha-os no título e na descrição. Para apagar, use delete_calendar_event com o id do evento.
 Se a ferramenta devolver needs_connection, o usuário vê o cartão para autorizar: explique em 1 frase e não repita a chamada.
+OUTLOOK (Microsoft): as mesmas ferramentas de e-mail e agenda funcionam com o Outlook. Se o usuário falar em Outlook, Hotmail, Microsoft ou Teams, passe provider="outlook"; se falar em Gmail ou Google, provider="google"; senão deixe vazio (vale o que ele conectou). Reunião online no Outlook gera link do Microsoft Teams (meet=true). No Outlook os avisos seguem o padrão da agenda.
 GOOGLE MEET: se o usuário pedir reunião online, videochamada ou Meet, chame create_calendar_event com meet=true e passe o link devolvido (meetLink) na resposta. Se meetLink vier vazio, diga que o evento foi criado mas o Google não gerou o link. Você NÃO convida outras pessoas: diga que ele pode copiar o link e enviar a quem quiser.
 NUNCA confirme que existe um compromisso (nem repita horário ou link) com base na conversa: antes, sempre consulte list_calendar_events.
 REGRA DA AGENDA: só diga que criou, agendou, marcou ou apagou algo DEPOIS de chamar create_calendar_event ou delete_calendar_event e receber ok. Nunca confirme por conta própria.
@@ -192,6 +193,10 @@ const calendarTools = [
     },
   },
 ]
+
+// qual conta usar quando o usuário tem Google e Microsoft: só preenche se ele disse (Outlook, Hotmail, Microsoft, Teams = outlook)
+const providerParam = { type: 'string', enum: ['google', 'outlook'], description: 'Use "outlook" se o usuário falou em Outlook, Hotmail, Microsoft ou Teams; "google" se falou em Gmail, Google ou Meet. Sem isso, deixe vazio.' }
+for (const tool of [...gmailTools, ...calendarTools]) tool.function.parameters.properties.provider = providerParam
 
 // Notion (via Composio): buscar, ler e criar páginas só nas páginas que o usuário liberou. Nunca apaga nem reescreve.
 const notionTools = [
@@ -508,8 +513,8 @@ ${financialContext}` })
         let result
         try {
           result = call.function.name === 'search_gmail'
-            ? await searchGmail(userId, { query: args.query, maxResults: args.max_results, pageToken: args.page_token })
-            : await readGmailMessage(userId, args.message_id)
+            ? await searchGmail(userId, { query: args.query, maxResults: args.max_results, pageToken: args.page_token, provider: args.provider })
+            : await readGmailMessage(userId, args.message_id, args.provider)
         } catch (err) {
           messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: false, error: 'Não consegui acessar o Gmail agora' }) })
           console.error('[gmail]', err.message)
@@ -519,7 +524,8 @@ ${financialContext}` })
           if (channel === 'whatsapp') {
             messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ needs_connection: true, observacao: 'O Gmail ainda não está conectado. A conexão só é feita no app: peça para abrir Minha conta, depois Apps, e conectar o Gmail.' }) })
           } else {
-            if (!widgets.some((w) => w.type === 'connectApp')) widgets.push({ type: 'connectApp', title: 'Conectar o Gmail', app: 'gmail', name: 'Gmail', reason: String(args.reason ?? 'para procurar nos seus e-mails').slice(0, 200) })
+            const mailApp = result.needsConnection === 'outlook' ? { app: 'outlook', name: 'Outlook' } : { app: 'gmail', name: 'Gmail' }
+            if (!widgets.some((w) => w.type === 'connectApp')) widgets.push({ type: 'connectApp', title: `Conectar o ${mailApp.name}`, app: mailApp.app, name: mailApp.name, reason: String(args.reason ?? 'para procurar nos seus e-mails').slice(0, 200) })
             messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ needs_connection: true, observacao: 'O usuário vê agora um cartão para autorizar o Gmail. Depois que ele autorizar, ele pede de novo.' }) })
           }
           continue
@@ -527,7 +533,7 @@ ${financialContext}` })
         // um único bloco mostra tudo o que foi lido, para o usuário saber de onde vieram as respostas
         const read = result.emails ?? [result.email]
         if (!mailWidget) {
-          mailWidget = { type: 'mailRead', title: 'E-mails lidos no Gmail', count: 0, items: [] }
+          mailWidget = { type: 'mailRead', title: 'E-mails lidos', count: 0, items: [] }
           widgets.push(mailWidget)
         }
         mailWidget.count += read.length
@@ -543,8 +549,8 @@ ${financialContext}` })
         let result
         try {
           if (call.function.name === 'list_calendar_events') listedCalendar = true
-          if (call.function.name === 'list_calendar_events') result = await calendarEvents(userId, { from: args.from, to: args.to })
-          else if (call.function.name === 'create_calendar_event') result = await createCalendarEvent(userId, { title: args.title, start: args.start, durationMinutes: args.duration_minutes, description: args.description, reminders: args.reminders, meet: args.meet })
+          if (call.function.name === 'list_calendar_events') result = await calendarEvents(userId, { from: args.from, to: args.to, provider: args.provider })
+          else if (call.function.name === 'create_calendar_event') result = await createCalendarEvent(userId, { title: args.title, start: args.start, durationMinutes: args.duration_minutes, description: args.description, reminders: args.reminders, meet: args.meet, provider: args.provider })
           else result = await deleteCalendarEvent(userId, args.event_id, args.calendar_id)
         } catch (err) {
           console.error('[agenda]', err.message)
@@ -556,7 +562,8 @@ ${financialContext}` })
           if (channel === 'whatsapp') {
             messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ needs_connection: true, observacao: 'A agenda ainda não está conectada. A conexão só é feita no site: peça para abrir Minha conta, depois Apps, e conectar o Google Calendar.' }) })
           } else {
-            if (!widgets.some((w) => w.type === 'connectApp' && w.app === 'googlecalendar')) widgets.push({ type: 'connectApp', title: 'Conectar o Google Calendar', app: 'googlecalendar', name: 'Google Calendar', reason: String(args.reason ?? 'para acessar a sua agenda').slice(0, 200) })
+            const calApp = result.needsConnection === 'outlook' ? { app: 'outlook', name: 'Outlook' } : { app: 'googlecalendar', name: 'Google Calendar' }
+            if (!widgets.some((w) => w.type === 'connectApp' && w.app === calApp.app)) widgets.push({ type: 'connectApp', title: `Conectar o ${calApp.name}`, app: calApp.app, name: calApp.name, reason: String(args.reason ?? 'para acessar a sua agenda').slice(0, 200) })
             messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ needs_connection: true, observacao: 'O usuário vê agora um cartão para autorizar o Google Calendar. Depois que ele autorizar, ele pede de novo.' }) })
           }
           continue
