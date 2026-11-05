@@ -106,17 +106,24 @@ router.post('/password/start', async (req, res) => {
   res.json({ ok: true })
 })
 
-// Etapa 2: CPF + código recebido + nova senha
-router.post('/password/reset', async (req, res) => {
+// Etapa 2: confere o código -> devolve um token curto que só vale para trocar a senha
+router.post('/password/verify', async (req, res) => {
   const cpf = onlyDigits(req.body?.cpf)
-  const { code, newPassword } = req.body ?? {}
   if (!validCpf(cpf)) throw new HttpError(400, 'CPF inválido')
-  if (typeof newPassword !== 'string' || newPassword.length < 8) throw new HttpError(400, 'A nova senha precisa ter ao menos 8 caracteres')
   const [user] = await query('SELECT id, phone FROM users WHERE cpf = ? LIMIT 1', [cpf])
   if (!user) throw new HttpError(400, 'Código incorreto ou expirado')
-  await checkCode(user.phone, code)
-  await query('UPDATE users SET password_hash = ? WHERE id = ?', [await bcrypt.hash(newPassword, 12), user.id])
-  console.log(`[conta] usuário ${user.id} redefiniu a senha`)
+  await checkCode(user.phone, req.body?.code)
+  res.json({ resetToken: signToken({ type: 'password-reset', sub: user.id }, '15m') })
+})
+
+// Etapa 3: token + nova senha
+router.post('/password/reset', async (req, res) => {
+  const { resetToken, newPassword } = req.body ?? {}
+  const claims = verifyToken(resetToken)
+  if (claims.type !== 'password-reset') throw new HttpError(401, 'Token inválido')
+  if (typeof newPassword !== 'string' || newPassword.length < 8) throw new HttpError(400, 'A nova senha precisa ter ao menos 8 caracteres')
+  await query('UPDATE users SET password_hash = ? WHERE id = ?', [await bcrypt.hash(newPassword, 12), claims.sub])
+  console.log(`[conta] usuário ${claims.sub} redefiniu a senha`)
   res.status(204).end()
 })
 
