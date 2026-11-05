@@ -90,6 +90,36 @@ router.post('/login', async (req, res) => {
   res.json({ token: signToken({ type: 'session', sub: user.id }), user: publicUser(user) })
 })
 
+// Esqueci minha senha, etapa 1: CPF -> manda um código por WhatsApp para o celular da conta.
+// A resposta é sempre a mesma, exista a conta ou não, para não revelar quais CPFs têm cadastro.
+router.post('/password/start', async (req, res) => {
+  const cpf = onlyDigits(req.body?.cpf)
+  if (!validCpf(cpf)) throw new HttpError(400, 'CPF inválido')
+  const [user] = await query('SELECT phone FROM users WHERE cpf = ? LIMIT 1', [cpf])
+  if (user) {
+    try {
+      await sendCode(user.phone)
+    } catch (err) {
+      if (err.status !== 429) throw err // pediu código demais: segue com a mesma resposta
+    }
+  }
+  res.json({ ok: true })
+})
+
+// Etapa 2: CPF + código recebido + nova senha
+router.post('/password/reset', async (req, res) => {
+  const cpf = onlyDigits(req.body?.cpf)
+  const { code, newPassword } = req.body ?? {}
+  if (!validCpf(cpf)) throw new HttpError(400, 'CPF inválido')
+  if (typeof newPassword !== 'string' || newPassword.length < 8) throw new HttpError(400, 'A nova senha precisa ter ao menos 8 caracteres')
+  const [user] = await query('SELECT id, phone FROM users WHERE cpf = ? LIMIT 1', [cpf])
+  if (!user) throw new HttpError(400, 'Código incorreto ou expirado')
+  await checkCode(user.phone, code)
+  await query('UPDATE users SET password_hash = ? WHERE id = ?', [await bcrypt.hash(newPassword, 12), user.id])
+  console.log(`[conta] usuário ${user.id} redefiniu a senha`)
+  res.status(204).end()
+})
+
 router.get('/me', requireAuth, async (req, res) => {
   const [user] = await query('SELECT * FROM users WHERE id = ?', [req.userId])
   if (!user) throw new HttpError(401, 'Conta não encontrada')

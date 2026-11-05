@@ -70,7 +70,7 @@ async function handleIncoming(payload) {
 
   if (!hasAccess(user)) {
     if (allowed(`plan:${phone}`, 3_600_000)) {
-      await sendWhatsApp(phone, `Seu teste grátis acabou 🦊 Assine o plano Pro em ${SIGNUP_URL} para continuar conversando comigo.`)
+      await sendWhatsApp(phone, `Seu acesso ao Anota Grana está suspenso 🦊 Assine o plano Pro em ${SIGNUP_URL} para continuar conversando comigo.`)
     }
     return
   }

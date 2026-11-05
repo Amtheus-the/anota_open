@@ -12,7 +12,7 @@ export const config = {
   // dias de teste grátis para quem cria a conta (não existe plano gratuito)
   trialDays: Number(env.TRIAL_DAYS ?? 30),
   // versão vigente dos Termos de Uso e da Política de Privacidade (muda quando o texto muda; o aceite guarda esta versão)
-  termsVersion: '2026-10-29',
+  termsVersion: '2026-11-05',
   // preço mensal de cada plano (R$): a cobrança do Pix Automático e o MRR do painel usam estes valores
   plans: { pro: 15.9, premium: 34.9 },
   // Asaas (Pix Automático). Sem ASAAS_ENV=production usa o sandbox, onde nenhum dinheiro de verdade se move.

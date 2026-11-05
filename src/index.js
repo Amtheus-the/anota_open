@@ -25,7 +25,8 @@ assertConfig()
 const app = express()
 // diagnóstico de hospedagem: mostra nos logs se as requisições chegam ao app (pode sair quando o deploy estiver estável)
 app.use((req, _res, next) => {
-  console.log(`[req] ${req.method} ${req.url}`)
+  // o segredo do webhook do WhatsApp vai na URL: não pode ir para o log
+  console.log(`[req] ${req.method} ${req.url.replace(/(\/webhook\/)[^/?]+/, '$1***').split('?')[0]}`)
   next()
 })
 app.disable('x-powered-by')
