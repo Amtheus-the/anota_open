@@ -27,6 +27,8 @@ export const config = {
     apiKey: env.COMPOSIO_API_KEY,
     baseUrl: (env.COMPOSIO_BASE_URL || 'https://backend.composio.dev/api/v3.1').replace(/\/+$/, ''),
   },
+  // CPFs de contas de demonstração: em produção elas também veem os bancos de teste da Pluggy (dados fictícios)
+  sandboxCpfs: (env.SANDBOX_CPFS ?? '').split(',').map((cpf) => cpf.replace(/\D/g, '')).filter(Boolean),
   // CPFs (só dígitos, separados por vírgula) que acessam o painel /admin; sem isso ninguém é admin
   adminCpfs: (env.ADMIN_CPFS ?? '').split(',').map((cpf) => cpf.replace(/\D/g, '')).filter(Boolean),
   db: {

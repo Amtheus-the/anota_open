@@ -77,7 +77,7 @@ export function mapItemStatus(item) {
 // Ordem de destaque na lista (a mesma do Pierre original)
 const POPULAR = ['Nubank', 'Inter', 'Itaú', 'Mercado Pago', 'Santander', 'PicPay', 'Banco do Brasil', 'Bradesco', 'InfinitePay', 'C6 Bank']
 const CONNECTORS_TTL_MS = 60 * 60 * 1000
-let connectorsCache = { list: null, expiresAt: 0 }
+const connectorsCache = new Map() // por modo: com e sem os bancos de teste
 
 const MEUPLUGGY_ID = 200 // conexão da conta pessoal do próprio usuário, via MeuPluggy
 const SANDBOX_OPEN_FINANCE_ID = 600 // banco de mentira que simula o fluxo Open Finance
@@ -98,12 +98,14 @@ const toInstitution = (c, extra = {}) => ({
 })
 
 // Instituições Open Finance para pessoa física (bancos e corretoras), com os destaques no topo.
-export async function listInstitutions() {
-  if (connectorsCache.list && Date.now() < connectorsCache.expiresAt) return connectorsCache.list
+// `sandbox` inclui os bancos de teste da Pluggy (padrão: só fora de produção; contas de demonstração também podem)
+export async function listInstitutions({ sandbox: withSandbox = !config.isProd } = {}) {
+  const cached = connectorsCache.get(withSandbox)
+  if (cached && Date.now() < cached.expiresAt) return cached.list
 
   const [live, sandbox] = await Promise.all([
     pluggy('/connectors?countries=BR'),
-    config.isProd ? { results: [] } : pluggy('/connectors?sandbox=true'),
+    withSandbox ? pluggy('/connectors?sandbox=true') : { results: [] },
   ])
   const liveList = live.results ?? []
 
@@ -127,7 +129,7 @@ export async function listInstitutions() {
     })
 
   const list = [...featured, ...banks]
-  connectorsCache = { list, expiresAt: Date.now() + CONNECTORS_TTL_MS }
+  connectorsCache.set(withSandbox, { list, expiresAt: Date.now() + CONNECTORS_TTL_MS })
   return list
 }
 

@@ -12,6 +12,13 @@ router.use(requireAuth)
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 
+// contas de demonstração (SANDBOX_CPFS) veem os bancos de teste também em produção
+async function sandboxFor(userId) {
+  if (!config.isProd) return true
+  const [user] = await query('SELECT cpf FROM users WHERE id = ?', [userId])
+  return Boolean(user) && config.sandboxCpfs.includes(user.cpf)
+}
+
 async function ownConnection(userId, id) {
   const [row] = await query('SELECT * FROM connected_accounts WHERE id = ? AND user_id = ?', [id, userId])
   if (!row) throw new HttpError(404, 'Conexão não encontrada')
@@ -27,14 +34,14 @@ async function syncStatus(connection, item) {
 }
 
 // Bancos e corretoras disponíveis para conectar
-router.get('/institutions', async (_req, res) => {
-  res.json({ institutions: await pluggy.listInstitutions() })
+router.get('/institutions', async (req, res) => {
+  res.json({ institutions: await pluggy.listInstitutions({ sandbox: await sandboxFor(req.userId) }) })
 })
 
 // 1) O usuário escolheu o banco e confirmou: cria o Item no fluxo OAuth
 router.post('/connections/start', requireAccess, async (req, res) => {
   const connectorId = Number(req.body.connectorId)
-  const institutions = await pluggy.listInstitutions()
+  const institutions = await pluggy.listInstitutions({ sandbox: await sandboxFor(req.userId) })
   const institution = institutions.find((i) => i.id === connectorId)
   if (!institution) throw new HttpError(400, 'Instituição inválida')
 
@@ -91,7 +98,7 @@ router.get('/connections', async (req, res) => {
   }
 
   // o logo vem da lista de instituições (em cache); se ela falhar, a conexão aparece sem logo
-  const institutions = await pluggy.listInstitutions().catch(() => [])
+  const institutions = await pluggy.listInstitutions({ sandbox: await sandboxFor(req.userId) }).catch(() => [])
   // a tela "Conexões bancárias" pede também de quando são os dados de cada banco (uma consulta à Pluggy por conexão)
   let updatedAt = new Map()
   if (req.query.details === '1') {
